@@ -1,0 +1,2 @@
+# Phase one has no external Python package dependencies.
+# pyRevit APIs are provided by the pyRevit/Revit runtime.

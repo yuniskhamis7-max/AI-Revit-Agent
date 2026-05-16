@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs
+logs/**/*.log
+
+# Revit / pyRevit local files
+*.rvt
+*.rfa
+*.rte
+*.rft
+*.slog
+*.addin
+
+# IDE and OS noise
+.idea/
+.vs/
+Thumbs.db
+Desktop.ini
