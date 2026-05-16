@@ -4,8 +4,6 @@ The UI layer gives users visibility and approval before structured payloads are
 executed. It never performs Revit API write operations.
 """
 
-import os
-
 from pyrevit import forms
 
 
@@ -24,18 +22,16 @@ def confirm_demo_workflow():
     )
 
 
-def select_payload_file(paths):
-    """Let the user select a payload JSON file."""
-    if not paths:
-        forms.alert("No payload JSON files were found.", title="AI Revit Agent")
-        return None
-
-    names = [os.path.basename(path) for path in paths]
-    selected = forms.SelectFromList.show(names, title="Select Payload File")
-    if not selected:
-        return None
-
-    return paths[names.index(selected)]
+def ask_for_instruction():
+    """Open a large editor for controlled natural-language instructions."""
+    window = TextEditorWindow(
+        "Enter BIM Instruction",
+        "Enter one controlled instruction, then press Use Instruction.",
+        "Create 3 levels spaced 4000 mm apart",
+        "Use Instruction",
+    )
+    window.ShowDialog()
+    return window.result_text
 
 
 def preview_payload_text(text):
@@ -59,7 +55,12 @@ def confirm_payload_edit():
 
 def edit_payload_text(text):
     """Open a large multiline editor for payload JSON."""
-    window = PayloadEditorWindow(text)
+    window = TextEditorWindow(
+        "Edit Payload JSON",
+        "Review or edit the JSON payload before validation.",
+        text,
+        "Use Payload",
+    )
     window.ShowDialog()
     return window.result_text
 
@@ -107,18 +108,21 @@ def _format_results(results):
     return "\n".join(lines)
 
 
-class PayloadEditorWindow(forms.WPFWindow):
-    """Large pyRevit WPF editor for reviewing and editing JSON payload text."""
+class TextEditorWindow(forms.WPFWindow):
+    """Large pyRevit WPF editor for reviewing or entering text."""
 
-    def __init__(self, text):
-        forms.WPFWindow.__init__(self, PAYLOAD_EDITOR_XAML, literal_string=True)
+    def __init__(self, title, prompt, text, accept_label):
+        forms.WPFWindow.__init__(self, TEXT_EDITOR_XAML, literal_string=True)
         self.result_text = None
-        self.payload_text.Text = text
-        self.payload_text.Focus()
+        self.Title = title
+        self.prompt_text.Text = prompt
+        self.text_input.Text = text
+        self.accept_button.Content = accept_label
+        self.text_input.Focus()
 
     def save_clicked(self, sender, args):
-        """Return edited text to the runtime layer."""
-        self.result_text = self.payload_text.Text
+        """Return edited or entered text to the runtime layer."""
+        self.result_text = self.text_input.Text
         self.Close()
 
     def cancel_clicked(self, sender, args):
@@ -127,10 +131,9 @@ class PayloadEditorWindow(forms.WPFWindow):
         self.Close()
 
 
-PAYLOAD_EDITOR_XAML = """
+TEXT_EDITOR_XAML = """
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Edit Payload JSON"
         Width="900"
         Height="650"
         MinWidth="700"
@@ -145,11 +148,11 @@ PAYLOAD_EDITOR_XAML = """
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0"
-                   Text="Review or edit the JSON payload before validation."
+                   x:Name="prompt_text"
                    Margin="0,0,0,8"/>
 
         <TextBox Grid.Row="1"
-                 x:Name="payload_text"
+                 x:Name="text_input"
                  AcceptsReturn="True"
                  AcceptsTab="True"
                  VerticalScrollBarVisibility="Auto"
@@ -168,8 +171,8 @@ PAYLOAD_EDITOR_XAML = """
                     Height="30"
                     Margin="0,0,8,0"
                     Click="cancel_clicked"/>
-            <Button Content="Use Payload"
-                    Width="110"
+            <Button x:Name="accept_button"
+                    Width="130"
                     Height="30"
                     Click="save_clicked"/>
         </StackPanel>

@@ -5,9 +5,15 @@ they can safely validate future AI-generated payload data before execution.
 """
 
 
+try:
+    TEXT_TYPES = (basestring,)
+except NameError:
+    TEXT_TYPES = (str,)
+
+
 def is_non_empty_text(value):
     """Return True when value is a non-empty text value."""
-    return isinstance(value, str) and bool(value.strip())
+    return isinstance(value, TEXT_TYPES) and bool(value.strip())
 
 
 def has_required_fields(data, required_fields):

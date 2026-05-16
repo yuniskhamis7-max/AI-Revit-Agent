@@ -1,35 +1,35 @@
 """Runtime executor for pyRevit command execution.
 
-The executor owns the human-in-the-loop console flow: load, inspect, edit,
-validate, approve, execute, and visualize structured payload results.
+The executor owns the human-in-the-loop instruction flow: interpret, inspect,
+edit, validate, approve, execute, and visualize structured payload results.
 """
 
 from app.main import bootstrap
-from app.config import PAYLOADS_DIR
+from interpreter.parser import parse_instruction
+from interpreter.translator import translate
 from revit.document import get_active_document
 from revit.ui import (
+    ask_for_instruction,
     confirm_payload_edit,
     confirm_payload_execution,
     edit_payload_text,
     preview_payload_text,
-    select_payload_file,
     show_execution_result,
     show_validation_errors,
 )
 from runtime.workflow import execute_payloads, has_validation_errors, validate_payloads
 from tools.payload_loader import (
-    list_payload_files,
-    load_payload_file,
     parse_payload_text,
     payload_to_text,
 )
 
 
 INVALID_EDITED_PAYLOAD = object()
+INVALID_SOURCE_PAYLOAD = object()
 
 
 def run():
-    """Run the phase-four payload inspection and approval console."""
+    """Run the phase-five controlled instruction and payload console."""
     logger = bootstrap()
 
     try:
@@ -47,20 +47,44 @@ def run():
 
 
 def _run_payload_console(logger):
-    """Load, review, validate, approve, and execute payloads."""
-    payload_path = select_payload_file(list_payload_files(PAYLOADS_DIR))
-    if not payload_path:
-        logger.info("Payload execution cancelled before file selection.")
+    """Collect one instruction, inspect payloads, approve, and execute."""
+    payload = _payload_from_instruction(logger)
+    if payload is INVALID_SOURCE_PAYLOAD:
+        return _validation_failed("Could not create payload from instruction.")
+    if payload is None:
         return _cancelled("Payload execution cancelled.")
 
-    load_result = load_payload_file(payload_path)
-    logger.info("Loaded payload file: {}".format(payload_path))
-    if not load_result["success"]:
-        result = _validation_failed(load_result["error"])
-        show_validation_errors(result["results"])
-        return result
+    return _review_validate_approve_execute(logger, payload)
 
-    payload = _inspect_payload(logger, load_result["payload"])
+
+def _payload_from_instruction(logger):
+    """Parse deterministic language and translate it into payloads."""
+    instruction = ask_for_instruction()
+    if not instruction:
+        logger.info("Instruction entry cancelled.")
+        return None
+
+    logger.info("User instruction: {}".format(instruction))
+    parsed = parse_instruction(instruction)
+    logger.info("Interpretation result: {}".format(parsed))
+    if not parsed["success"]:
+        logger.error("Interpretation failure: {}".format(parsed["error"]))
+        show_validation_errors([_result(False, "instruction", parsed["error"], "interpretation_failed")])
+        return INVALID_SOURCE_PAYLOAD
+
+    translated = translate(parsed)
+    logger.info("Generated payloads: {}".format(translated))
+    if not translated["success"]:
+        logger.error("Translation failure: {}".format(translated["error"]))
+        show_validation_errors([_result(False, "instruction", translated["error"], "translation_failed")])
+        return INVALID_SOURCE_PAYLOAD
+
+    return translated["payloads"]
+
+
+def _review_validate_approve_execute(logger, payload):
+    """Inspect, optionally edit, validate, approve, and execute payloads."""
+    payload = _inspect_payload(logger, payload)
     if payload is INVALID_EDITED_PAYLOAD:
         return _validation_failed("Edited payload JSON is invalid.")
     if payload is None:
