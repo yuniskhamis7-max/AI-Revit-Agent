@@ -1,0 +1,17 @@
+[
+    {
+        "action": "create_level",
+        "data": {
+            "name": "AI Payload Level",
+            "elevation": 15.0
+        }
+    },
+    {
+        "action": "create_grid",
+        "data": {
+            "name": "AI Payload Grid",
+            "start": [0.0, 15.0, 0.0],
+            "end": [30.0, 15.0, 0.0]
+        }
+    }
+]
