@@ -7,6 +7,7 @@ this layer validates, dispatches, and sequences actions safely.
 
 import logging
 
+from runtime_context.snapshot import grid_names, level_names
 from revit.grids import create_grid, list_grid_names
 from revit.levels import create_level, list_level_names
 from schemas import grid_schema, level_schema
@@ -36,7 +37,7 @@ def run_demo_workflow(document):
     return execute_payloads(document, payloads)
 
 
-def execute_payloads(document, payloads):
+def execute_payloads(document, payloads, context_snapshot=None):
     """Execute one payload or a list of payloads sequentially."""
     logger = logging.getLogger("ai_revit_agent")
     payload_list = _as_payload_list(payloads)
@@ -52,7 +53,7 @@ def execute_payloads(document, payloads):
         }
 
     for payload in payload_list:
-        result = execute_payload(document, payload)
+        result = execute_payload(document, payload, context_snapshot)
         results.append(result)
 
     return {
@@ -62,7 +63,7 @@ def execute_payloads(document, payloads):
     }
 
 
-def validate_payloads(document, payloads):
+def validate_payloads(document, payloads, context_snapshot=None):
     """Validate one or many payloads without executing Revit operations."""
     payload_list = _as_payload_list(payloads)
     results = []
@@ -73,19 +74,19 @@ def validate_payloads(document, payloads):
         return [_failure("validation_failed", "No payloads were provided.")]
 
     for payload in payload_list:
-        result = _validate_payload(document, payload, seen_level_names, seen_grid_names)
+        result = _validate_payload(document, payload, seen_level_names, seen_grid_names, context_snapshot)
         results.append(result)
         _remember_valid_name(payload, seen_level_names, seen_grid_names, result)
 
     return results
 
 
-def execute_payload(document, payload):
+def execute_payload(document, payload, context_snapshot=None):
     """Validate and dispatch a single standardized action payload."""
     logger = logging.getLogger("ai_revit_agent")
     logger.info("Received payload: {}".format(payload))
 
-    result = _dispatch_payload(document, payload)
+    result = _dispatch_payload(document, payload, context_snapshot)
     _log_result(logger, result)
     return result
 
@@ -95,7 +96,7 @@ def has_validation_errors(validation_results):
     return any(not result["success"] for result in validation_results)
 
 
-def _dispatch_payload(document, payload):
+def _dispatch_payload(document, payload, context_snapshot=None):
     """Route one validated payload to the supported deterministic action."""
     error = validate_payload_shape(payload)
     if error:
@@ -103,14 +104,14 @@ def _dispatch_payload(document, payload):
 
     action = payload["action"]
     if action == "create_level":
-        return _execute_create_level(document, payload["data"])
+        return _execute_create_level(document, payload["data"], context_snapshot)
     if action == "create_grid":
-        return _execute_create_grid(document, payload["data"])
+        return _execute_create_grid(document, payload["data"], context_snapshot)
 
     return _failure("unsupported_action", "Unsupported action: {}".format(action))
 
 
-def _validate_payload(document, payload, seen_level_names, seen_grid_names):
+def _validate_payload(document, payload, seen_level_names, seen_grid_names, context_snapshot=None):
     """Validate payload shape, action support, schema data, and duplicates."""
     error = validate_payload_shape(payload)
     if error:
@@ -120,10 +121,10 @@ def _validate_payload(document, payload, seen_level_names, seen_grid_names):
     data = payload["data"]
 
     if action == "create_level":
-        names = list_level_names(document) + seen_level_names
+        names = _context_level_names(document, context_snapshot) + seen_level_names
         return _validation_result(action, level_schema.validate(data, names))
     if action == "create_grid":
-        names = list_grid_names(document) + seen_grid_names
+        names = _context_grid_names(document, context_snapshot) + seen_grid_names
         return _validation_result(action, grid_schema.validate(data, names))
 
     return _failure("unsupported_action", "Unsupported action: {}".format(action))
@@ -159,9 +160,9 @@ def _as_payload_list(payloads):
     return [payloads]
 
 
-def _execute_create_level(document, data):
+def _execute_create_level(document, data, context_snapshot=None):
     """Validate and execute a create_level action."""
-    error = level_schema.validate(data, list_level_names(document))
+    error = level_schema.validate(data, _context_level_names(document, context_snapshot))
     if error:
         return _failure("validation_failed", error, "create_level")
 
@@ -169,9 +170,9 @@ def _execute_create_level(document, data):
     return _normalize_result("create_level", result)
 
 
-def _execute_create_grid(document, data):
+def _execute_create_grid(document, data, context_snapshot=None):
     """Validate and execute a create_grid action."""
-    error = grid_schema.validate(data, list_grid_names(document))
+    error = grid_schema.validate(data, _context_grid_names(document, context_snapshot))
     if error:
         return _failure("validation_failed", error, "create_grid")
 
@@ -217,3 +218,17 @@ def _log_result(logger, result):
         logger.info("Execution success: {}".format(result["message"]))
     else:
         logger.error("Execution error: {} | {}".format(result["error"], result["message"]))
+
+
+def _context_level_names(document, context_snapshot=None):
+    """Return level names from context snapshot, falling back to live read."""
+    if context_snapshot:
+        return level_names(context_snapshot)
+    return list_level_names(document)
+
+
+def _context_grid_names(document, context_snapshot=None):
+    """Return grid names from context snapshot, falling back to live read."""
+    if context_snapshot:
+        return grid_names(context_snapshot)
+    return list_grid_names(document)

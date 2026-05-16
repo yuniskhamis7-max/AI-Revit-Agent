@@ -4,6 +4,9 @@ Translation is separate from parsing and execution so future AI understanding
 can be swapped in while deterministic payload validation remains unchanged.
 """
 
+from runtime_context.snapshot import grid_names, level_names
+from tools.validators import has_duplicate_name
+
 
 MM_TO_FEET = 1.0 / 304.8
 M_TO_FEET = 1.0 / 0.3048
@@ -11,7 +14,7 @@ DEFAULT_GRID_LENGTH = 10000.0
 DEFAULT_GRID_SPACING = 4000.0
 
 
-def translate(parsed_result):
+def translate(parsed_result, context_snapshot=None):
     """Convert a successful parse result into standardized payloads."""
     if not parsed_result["success"]:
         return _failure(parsed_result["error"])
@@ -20,13 +23,17 @@ def translate(parsed_result):
     instruction_type = instruction["type"]
 
     if instruction_type == "levels_spaced":
-        return _success(_levels_spaced_payloads(instruction))
+        payloads = _levels_spaced_payloads(instruction)
+        return _context_checked_success(payloads, context_snapshot)
     if instruction_type == "level_at":
-        return _success([_level_payload(instruction["name"], instruction["elevation"], instruction["unit"])])
+        payloads = [_level_payload(instruction["name"], instruction["elevation"], instruction["unit"])]
+        return _context_checked_success(payloads, context_snapshot)
     if instruction_type == "grids_named":
-        return _success(_grids_named_payloads(instruction))
+        payloads = _grids_named_payloads(instruction)
+        return _context_checked_success(payloads, context_snapshot)
     if instruction_type == "grid_from_to":
-        return _success([_grid_from_to_payload(instruction)])
+        payloads = [_grid_from_to_payload(instruction)]
+        return _context_checked_success(payloads, context_snapshot)
 
     return _failure("Parsed instruction type is not supported.")
 
@@ -96,6 +103,45 @@ def _to_feet(value, unit):
     if unit == "m":
         return value * M_TO_FEET
     return value * MM_TO_FEET
+
+
+def _context_checked_success(payloads, context_snapshot):
+    """Return generated payloads or a context-aware duplicate-name failure."""
+    error = _find_context_conflict(payloads, context_snapshot)
+    if error:
+        return _failure(error)
+    return _success(payloads)
+
+
+def _find_context_conflict(payloads, context_snapshot):
+    """Detect generated names that already exist in the context snapshot."""
+    if not context_snapshot:
+        return None
+
+    for payload in payloads:
+        name = payload["data"]["name"]
+        if payload["action"] == "create_level" and has_duplicate_name(name, level_names(context_snapshot)):
+            return _duplicate_message("level", name, level_names(context_snapshot))
+        if payload["action"] == "create_grid" and has_duplicate_name(name, grid_names(context_snapshot)):
+            return _duplicate_message("grid", name, grid_names(context_snapshot))
+    return None
+
+
+def _duplicate_message(kind, name, existing_names):
+    """Create a deterministic duplicate-name message with an alternative."""
+    return "{} already exists: {}. Suggested name: {}.".format(
+        kind.title(),
+        name,
+        _suggest_name(name, existing_names),
+    )
+
+
+def _suggest_name(name, existing_names):
+    """Suggest the first available numbered name."""
+    index = 1
+    while has_duplicate_name("{} {}".format(name, index), existing_names):
+        index += 1
+    return "{} {}".format(name, index)
 
 
 def _success(payloads):

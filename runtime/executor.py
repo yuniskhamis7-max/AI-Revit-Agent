@@ -4,16 +4,21 @@ The executor owns the human-in-the-loop instruction flow: interpret, inspect,
 edit, validate, approve, execute, and visualize structured payload results.
 """
 
+from app.config import CONTEXT_SNAPSHOT_FILE
 from app.main import bootstrap
+from runtime_context.serializers import save_snapshot, to_json
+from runtime_context.snapshot import create_snapshot
 from interpreter.parser import parse_instruction
 from interpreter.translator import translate
 from revit.document import get_active_document
 from revit.ui import (
     ask_for_instruction,
+    confirm_context_preview,
     confirm_payload_edit,
     confirm_payload_execution,
     edit_payload_text,
     preview_payload_text,
+    show_context_snapshot,
     show_execution_result,
     show_validation_errors,
 )
@@ -29,7 +34,7 @@ INVALID_SOURCE_PAYLOAD = object()
 
 
 def run():
-    """Run the phase-five controlled instruction and payload console."""
+    """Run the phase-six context-aware instruction and payload console."""
     logger = bootstrap()
 
     try:
@@ -48,16 +53,29 @@ def run():
 
 def _run_payload_console(logger):
     """Collect one instruction, inspect payloads, approve, and execute."""
-    payload = _payload_from_instruction(logger)
+    document = get_active_document()
+    context_snapshot = _prepare_context(logger, document)
+
+    payload = _payload_from_instruction(logger, context_snapshot)
     if payload is INVALID_SOURCE_PAYLOAD:
         return _validation_failed("Could not create payload from instruction.")
     if payload is None:
         return _cancelled("Payload execution cancelled.")
 
-    return _review_validate_approve_execute(logger, payload)
+    return _review_validate_approve_execute(logger, document, payload, context_snapshot)
 
 
-def _payload_from_instruction(logger):
+def _prepare_context(logger, document):
+    """Create, log, and persist the read-only runtime context snapshot."""
+    context_snapshot = create_snapshot(document)
+    snapshot_text = to_json(context_snapshot)
+    logger.info("Generated context snapshot: {}".format(snapshot_text))
+    save_snapshot(context_snapshot, CONTEXT_SNAPSHOT_FILE)
+    logger.info("Saved context snapshot: {}".format(CONTEXT_SNAPSHOT_FILE))
+    return context_snapshot
+
+
+def _payload_from_instruction(logger, context_snapshot):
     """Parse deterministic language and translate it into payloads."""
     instruction = ask_for_instruction()
     if not instruction:
@@ -72,7 +90,8 @@ def _payload_from_instruction(logger):
         show_validation_errors([_result(False, "instruction", parsed["error"], "interpretation_failed")])
         return INVALID_SOURCE_PAYLOAD
 
-    translated = translate(parsed)
+    logger.info("Using context during interpretation: {}".format(to_json(context_snapshot)))
+    translated = translate(parsed, context_snapshot)
     logger.info("Generated payloads: {}".format(translated))
     if not translated["success"]:
         logger.error("Translation failure: {}".format(translated["error"]))
@@ -82,7 +101,7 @@ def _payload_from_instruction(logger):
     return translated["payloads"]
 
 
-def _review_validate_approve_execute(logger, payload):
+def _review_validate_approve_execute(logger, document, payload, context_snapshot):
     """Inspect, optionally edit, validate, approve, and execute payloads."""
     payload = _inspect_payload(logger, payload)
     if payload is INVALID_EDITED_PAYLOAD:
@@ -90,9 +109,12 @@ def _review_validate_approve_execute(logger, payload):
     if payload is None:
         return _cancelled("Payload execution cancelled during editing.")
 
+    if confirm_context_preview():
+        show_context_snapshot(to_json(context_snapshot))
+
     logger.info("Payload ready for validation: {}".format(payload))
-    document = get_active_document()
-    validation_results = validate_payloads(document, payload)
+    logger.info("Execution context state: {}".format(to_json(context_snapshot)))
+    validation_results = validate_payloads(document, payload, context_snapshot)
     if has_validation_errors(validation_results):
         logger.error("Validation failures: {}".format(validation_results))
         show_validation_errors(validation_results)
@@ -103,7 +125,7 @@ def _review_validate_approve_execute(logger, payload):
         return _cancelled("Payload execution cancelled before approval.")
 
     logger.info("Payload execution approved.")
-    result = execute_payloads(document, payload)
+    result = execute_payloads(document, payload, context_snapshot)
     logger.info("Execution results: {}".format(result))
     show_execution_result(result)
     return result

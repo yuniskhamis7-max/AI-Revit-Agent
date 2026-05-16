@@ -34,6 +34,25 @@ def ask_for_instruction():
     return window.result_text
 
 
+def confirm_context_preview():
+    """Ask whether the user wants to inspect the runtime context snapshot."""
+    return forms.alert(
+        "Inspect current model context before execution?",
+        title="AI Revit Agent",
+        yes=True,
+        no=True,
+    )
+
+
+def show_context_snapshot(snapshot_text):
+    """Display a serialized read-only context snapshot."""
+    forms.alert(
+        "Current runtime context snapshot.",
+        title="AI Revit Agent Context",
+        expanded=snapshot_text,
+    )
+
+
 def preview_payload_text(text):
     """Show the payload before execution."""
     forms.alert(

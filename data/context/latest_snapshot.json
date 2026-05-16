@@ -1,0 +1,20 @@
+{
+    "document": {
+        "name": "test"
+    }, 
+    "grids": [], 
+    "levels": [
+        {
+            "elevation": -7.2178477690288716, 
+            "id": 673829, 
+            "name": "T.O.F"
+        }
+    ], 
+    "summary": {
+        "grid_count": 0, 
+        "level_count": 1
+    }, 
+    "units": {
+        "length": "<Autodesk.Revit.DB.ForgeTypeId object at 0x0000000000000578 [Autodesk.Revit.DB.ForgeTypeId]>"
+    }
+}

@@ -5,11 +5,11 @@ Revit automation system built with Python, pyRevit, and clean architecture
 principles.
 
 This project validates the architecture, pyRevit button integration, import
-flow, runtime structure, logging setup, deterministic BIM execution, and
-human-approved payload execution flow. It also includes a controlled
-natural-language interpreter for simple BIM instructions. It intentionally does
-not include external AI APIs, advanced abstractions, databases, asynchronous
-execution, or broad business automation logic.
+flow, runtime structure, logging setup, deterministic BIM execution, structured
+runtime context snapshots, and human-approved payload execution flow. It also
+includes a controlled natural-language interpreter for simple BIM instructions.
+It intentionally does not include external AI APIs, advanced abstractions,
+databases, asynchronous execution, or broad business automation logic.
 
 ## Architecture
 
@@ -20,6 +20,8 @@ execution, or broad business automation logic.
 - `app/` owns startup, bootstrap, configuration, and logging setup.
 - `runtime/` owns orchestration, execution flow, workflow sequencing, and
   runtime context. It must not contain direct Revit API code.
+- `runtime_context/` owns read-only model-state inspection, context snapshots, and
+  snapshot serialization for future reasoning systems.
 - `interpreter/` converts controlled user language into structured payloads. It
   must not contain Revit API logic or execution logic.
 - `revit/` owns direct Revit and pyRevit API interactions only, including
@@ -38,14 +40,17 @@ execution, or broad business automation logic.
 3. The `Run Instruction` button runs `script.py`.
 4. `script.py` imports `runtime.executor.run()` and calls it.
 5. `runtime.executor.run()` initializes logging through `app.main.bootstrap()`.
-6. The instruction editor opens immediately.
-7. Natural-language instructions are parsed into structured payloads.
-8. The user previews and optionally edits generated payload JSON.
-9. The runtime validates the payload before execution approval.
-10. The dispatcher executes approved payload actions sequentially.
-11. Structured results are shown after execution.
+6. The runtime generates, logs, and saves a read-only context snapshot.
+7. The instruction editor opens.
+8. Natural-language instructions are parsed with context awareness.
+9. The user previews and optionally edits generated payload JSON.
+10. The user can inspect the current context snapshot before execution.
+11. The runtime validates the payload against the context snapshot.
+12. The dispatcher executes approved payload actions sequentially.
+13. Structured results are shown after execution.
 
 Runtime logs are written to `logs/runtime/ai_revit_agent.log`.
+The latest context snapshot is saved to `data/context/latest_snapshot.json`.
 
 ## Register the Extension with pyRevit
 
@@ -87,10 +92,11 @@ logs, tests, and future modules visible in one workspace.
 5. Enter a supported controlled instruction.
 6. Review the generated payload preview.
 7. Optionally edit the payload JSON.
-8. Approve execution.
-9. Confirm the requested level or grid elements are created.
-10. Confirm structured results are displayed.
-11. Confirm `logs/runtime/ai_revit_agent.log` is created after clicking the button.
+8. Optionally inspect the current model context snapshot.
+9. Approve execution.
+10. Confirm the requested level or grid elements are created.
+11. Confirm structured results are displayed.
+12. Confirm `logs/runtime/ai_revit_agent.log` is created after clicking the button.
 
 ## Test Payload Execution
 
@@ -224,3 +230,34 @@ success, action, message, error, and created element IDs.
 Interpreter logging: check `logs/runtime/ai_revit_agent.log` for user
 instructions, interpretation results, generated payloads, interpretation
 failures, validation failures, approval decisions, and execution results.
+
+## Test Context
+
+Context snapshot generation: click `Run Instruction`. A snapshot should be
+created before interpretation and saved to `data/context/latest_snapshot.json`.
+
+Context visualization: after the generated payload preview, choose to inspect
+the context snapshot. The dialog should show document name, project units,
+existing levels, existing grids, and summary counts.
+
+Duplicate detection using context: create a level or grid once, then run an
+instruction that would create the same name again. The interpreter or validator
+should stop execution with a duplicate-name message.
+
+Context-aware interpretation: enter `Create Level 1 at elevation 0` when
+`Level 1` already exists. The interpreter should report the conflict and include
+a suggested alternative name.
+
+Context serialization: inspect `data/context/latest_snapshot.json` after a run.
+It should be readable JSON containing the latest active document state.
+
+Context logging: check `logs/runtime/ai_revit_agent.log` for generated context
+snapshots, saved snapshot paths, context use during interpretation, validation
+failures, and execution context state.
+
+Validation using runtime context: edit a generated payload to use an existing
+level or grid name. Validation should fail before approval creates anything.
+
+Runtime flow integration: confirm that the same context snapshot is used for
+interpretation, validation, optional display, and execution logging during one
+button click.
