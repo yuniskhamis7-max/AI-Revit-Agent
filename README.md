@@ -1,263 +1,98 @@
 # AI Revit Agent
 
-AI Revit Agent is a minimal deterministic foundation for a scalable AI-assisted
-Revit automation system built with Python, pyRevit, and clean architecture
-principles.
+AI Revit Agent is a lightweight pyRevit drafting environment. The AI converts a
+human instruction into structured JSON payload data; deterministic Revit tools
+validate and execute only the selected BIM category.
 
-This project validates the architecture, pyRevit button integration, import
-flow, runtime structure, logging setup, deterministic BIM execution, structured
-runtime context snapshots, and human-approved payload execution flow. It also
-includes a controlled natural-language interpreter for simple BIM instructions.
-It intentionally does not include external AI APIs, advanced abstractions,
-databases, asynchronous execution, or broad business automation logic.
+The AI never generates Revit API code, Python code, transactions, or execution
+steps. It only returns data shaped like:
 
-## Architecture
+```json
+{
+    "levels": [],
+    "grids": [],
+    "columns": []
+}
+```
 
-- `extension/` contains the pyRevit extension structure that Revit loads.
-- `extension/AIRevit.extension/AI Revit.tab/Execution.panel/Run Instruction.pushbutton/script.py`
-  is the pyRevit button entrypoint. It only makes the project root importable
-  and calls the runtime executor.
-- `app/` owns startup, bootstrap, configuration, and logging setup.
-- `runtime/` owns orchestration, execution flow, workflow sequencing, and
-  runtime context. It must not contain direct Revit API code.
-- `runtime_context/` owns read-only model-state inspection, context snapshots, and
-  snapshot serialization for future reasoning systems.
-- `interpreter/` converts controlled user language into structured payloads. It
-  must not contain Revit API logic or execution logic.
-- `revit/` owns direct Revit and pyRevit API interactions only, including
-  transactions, levels, grids, document access, and UI dialogs.
-- `tools/` contains pure helper utilities, payload loading, and JSON parsing.
-- `schemas/` contains minimal structured placeholders for future AI-generated
-  data.
-- `state/` contains future runtime and session tracking placeholders.
-- `tests/`, `data/`, and `docs/` are intentionally empty project folders.
-- `logs/runtime`, `logs/errors`, and `logs/debug` are reserved logging folders.
+## Layers
 
-## Current Runtime Flow
+- `extension/` contains the pyRevit ribbon buttons.
+- `ai/` converts instructions into JSON payloads using Gemini.
+- `revit/` contains deterministic Revit operations and pyRevit UI only.
+- `run.py` saves `payload.json`, validates it, logs runs, and executes button flow.
+- `payload.json` is the current generated payload.
 
-1. Revit loads the pyRevit extension from `extension/AIRevit.extension`.
-2. The `AI Revit` tab displays the `Execution` panel.
-3. The `Run Instruction` button runs `script.py`.
-4. `script.py` imports `runtime.executor.run()` and calls it.
-5. `runtime.executor.run()` initializes logging through `app.main.bootstrap()`.
-6. The runtime generates, logs, and saves a read-only context snapshot.
-7. The instruction editor opens.
-8. Natural-language instructions are parsed with context awareness.
-9. The user previews and optionally edits generated payload JSON.
-10. The user can inspect the current context snapshot before execution.
-11. The runtime validates the payload against the context snapshot.
-12. The dispatcher executes approved payload actions sequentially.
-13. Structured results are shown after execution.
+No agents, memory systems, databases, async workers, or orchestration framework
+are included.
 
+## Ribbon
+
+The `AI Revit` tab contains four panels:
+
+- `Payload` -> `Generate Payload`
+- `Levels` -> `Create Levels`
+- `Grids` -> `Create Grids`
+- `Columns` -> `Create Columns`
+
+`Generate Payload` is the only button that asks for a natural-language
+instruction. It asks the AI to generate a full payload that can contain levels,
+grids, and columns, then saves it to `payload.json`.
+
+The category buttons do not ask for instructions. They load the current payload,
+preview only their category section, validate only that category, and execute
+only that category after approval.
+
+## AI Setup
+
+The AI layer uses Gemini 2.5 Flash. A project key is configured in
+`ai/parser.py`, and you can override it with an environment variable:
+
+```powershell
+$env:GEMINI_API_KEY = "your_api_key"
+```
+
+Optional model override:
+
+```powershell
+$env:GEMINI_MODEL = "gemini-2.5-flash"
+```
+
+The current AI-generated payload is saved at `payload.json`.
 Runtime logs are written to `logs/runtime/ai_revit_agent.log`.
-The latest context snapshot is saved to `data/context/latest_snapshot.json`.
 
-## Register the Extension with pyRevit
+## How To Test
 
-From a terminal, register the extension folder with pyRevit:
+AI instruction parsing: click `Generate Payload` and enter a clear instruction
+such as `Create two levels named Level 1 and Level 2 spaced 4000 mm apart`.
 
-```powershell
-pyrevit extensions paths add "d:\Construction\Projects\ai_revit_agent\extension"
-```
+Payload generation: inspect `payload.json` after the AI call. It
+should contain only `levels`, `grids`, and `columns` arrays.
 
-This registers the local folder that contains `AIRevit.extension`.
+Payload preview: after generation, the dialog should show the full generated
+payload. Category execution buttons should then preview only their own section.
 
-## Reload pyRevit
+Category-based execution: enter a mixed instruction containing levels, grids,
+and columns. Click one category button and confirm unrelated categories do not
+execute.
 
-After registering or changing the extension, reload pyRevit:
+Levels-only execution: click `Create Levels` with generated level payloads.
+Only levels should be created.
 
-```powershell
-pyrevit reload
-```
+Grids-only execution: click `Create Grids` with generated grid payloads. Only
+grids should be created.
 
-You can also reload from inside Revit using the pyRevit ribbon reload button.
+Columns-only execution: click `Create Columns` with generated column payloads.
+Referenced levels and the family/type must exist in the model.
 
-## Open in VS Code
-
-Open the project root folder directly:
-
-```powershell
-code "d:\Construction\Projects\ai_revit_agent"
-```
-
-Do not open only the `extension` folder. Opening the project root keeps imports,
-logs, tests, and future modules visible in one workspace.
-
-## Test Inside Revit
-
-1. Start or restart Revit after registering the extension.
-2. Confirm the `AI Revit` tab is visible.
-3. Open the `Execution` panel.
-4. Click the `Run Instruction` button.
-5. Enter a supported controlled instruction.
-6. Review the generated payload preview.
-7. Optionally edit the payload JSON.
-8. Optionally inspect the current model context snapshot.
-9. Approve execution.
-10. Confirm the requested level or grid elements are created.
-11. Confirm structured results are displayed.
-12. Confirm `logs/runtime/ai_revit_agent.log` is created after clicking the button.
-
-## Test Payload Execution
-
-Single payload execution can be tested from a pyRevit script context by calling
-`runtime.workflow.execute_payload(document, payload)` with:
-
-```python
-{
-    "action": "create_level",
-    "data": {
-        "name": "Payload Test Level",
-        "elevation": 20.0,
-    },
-}
-```
-
-Multi-action execution can be tested with
-`runtime.workflow.execute_payloads(document, payloads)` using:
-
-```python
-[
-    {
-        "action": "create_level",
-        "data": {
-            "name": "Payload Multi Level",
-            "elevation": 30.0,
-        },
-    },
-    {
-        "action": "create_grid",
-        "data": {
-            "name": "Payload Multi Grid",
-            "start": [0.0, 10.0, 0.0],
-            "end": [30.0, 10.0, 0.0],
-        },
-    },
-]
-```
-
-Validation failures can be tested by omitting a required field, using an
-unsupported action, using non-number elevations, or passing grid points that are
-not three-number lists.
-
-Duplicate detection can be tested by running the same valid payload twice. The
-second run should return a structured failure without creating another element.
-
-Logging output is written to `logs/runtime/ai_revit_agent.log` and records
-received payloads, validation failures, execution success, and execution errors.
-
-Structured execution results use this shape:
-
-```python
-{
-    "success": True,
-    "message": "Payload execution completed. Succeeded: 2. Failed: 0.",
-    "results": [
-        {
-            "success": True,
-            "action": "create_level",
-            "message": "Created level: Payload Multi Level",
-            "error": None,
-            "element_ids": [12345],
-        }
-    ],
-}
-```
-
-## Test Runtime Console
-
-Instruction entry: click the `Run Instruction` button and enter a supported
-controlled instruction.
-
-Payload editing: choose to edit the generated payload, change a name or
-elevation, and continue. The edited JSON is parsed and validated before
+Validation failures: ask for invalid data or manually edit
+`payload.json` during development, then run the relevant button.
+Missing required fields or invalid points/elevations should stop before
 execution.
 
-Validation failures: remove a required field, use invalid JSON, set an elevation
-to text, use an unsupported action, or make grid points invalid. The workflow
-should stop before execution and show validation results.
+Duplicate detection: run the same level or grid request twice. The second run
+should fail with a duplicate-name validation message.
 
-Approval flow: use a valid payload, skip or complete editing, then approve the
-execution prompt. The level and grid should be created.
-
-Cancellation flow: cancel instruction entry, payload editing, or final approval.
-No Revit elements should be created.
-
-Multi-action execution: use an instruction such as
-`Create 3 levels spaced 4000 mm apart` or `Create grids A, B, and C`. Actions
-are processed sequentially and each action receives its own structured result.
-
-Result visualization: after execution, the result dialog shows success, action,
-message, error, and created element IDs for each payload action.
-
-Logging behavior: check `logs/runtime/ai_revit_agent.log` for user
-instructions, generated payloads, edited payloads, validation failures, approval
-decisions, execution results, and execution errors.
-
-## Test Instructions
-
-Valid natural-language instructions:
-
-```text
-Create 3 levels spaced 4000 mm apart
-Create grids A, B, and C
-Create Level 1 at elevation 0
-Create grid A from 0,0 to 0,10000
-```
-
-Invalid instructions: use unsupported verbs, missing values, negative spacing,
-or text that does not match the controlled grammar. The interpreter should show
-a structured interpretation failure and stop before payload validation.
-
-Ambiguous instructions: enter `Create grid A` or `Create levels`. These should
-fail because they do not provide enough deterministic execution data.
-
-Payload generation: after entering a valid instruction, review the generated
-payload preview. Numeric instruction values are converted to Revit internal feet;
-instructions default to millimeters unless `m` or `ft` is provided.
-
-Payload editing: choose to edit the generated payload JSON before validation.
-Invalid JSON or invalid payload values should stop before execution.
-
-Execution approval: approve the final prompt to execute validated payloads.
-
-Execution cancellation: cancel instruction entry, payload editing, or final
-approval. No Revit elements should be created.
-
-Structured execution results: after execution, inspect the result dialog for
-success, action, message, error, and created element IDs.
-
-Interpreter logging: check `logs/runtime/ai_revit_agent.log` for user
-instructions, interpretation results, generated payloads, interpretation
-failures, validation failures, approval decisions, and execution results.
-
-## Test Context
-
-Context snapshot generation: click `Run Instruction`. A snapshot should be
-created before interpretation and saved to `data/context/latest_snapshot.json`.
-
-Context visualization: after the generated payload preview, choose to inspect
-the context snapshot. The dialog should show document name, project units,
-existing levels, existing grids, and summary counts.
-
-Duplicate detection using context: create a level or grid once, then run an
-instruction that would create the same name again. The interpreter or validator
-should stop execution with a duplicate-name message.
-
-Context-aware interpretation: enter `Create Level 1 at elevation 0` when
-`Level 1` already exists. The interpreter should report the conflict and include
-a suggested alternative name.
-
-Context serialization: inspect `data/context/latest_snapshot.json` after a run.
-It should be readable JSON containing the latest active document state.
-
-Context logging: check `logs/runtime/ai_revit_agent.log` for generated context
-snapshots, saved snapshot paths, context use during interpretation, validation
-failures, and execution context state.
-
-Validation using runtime context: edit a generated payload to use an existing
-level or grid name. Validation should fail before approval creates anything.
-
-Runtime flow integration: confirm that the same context snapshot is used for
-interpretation, validation, optional display, and execution logging during one
-button click.
+Logging behavior: inspect `logs/runtime/ai_revit_agent.log` for user
+instructions, AI payloads, validation failures, approvals, and execution
+results.

@@ -7,8 +7,6 @@ data validation stay outside this layer.
 from Autodesk.Revit.DB import FilteredElementCollector, Level
 
 from revit.transactions import run_in_transaction
-from tools.validators import has_duplicate_name
-
 
 def list_level_names(document):
     """Return existing level names from the active Revit document."""
@@ -34,3 +32,10 @@ def create_level(document, name, elevation):
         }
 
     return run_in_transaction(document, "Create Level {}".format(name), action)
+
+
+def has_duplicate_name(name, existing_names):
+    """Return True when name already exists in a case-insensitive list."""
+    if not name:
+        return False
+    return name.strip().lower() in [existing.strip().lower() for existing in existing_names]

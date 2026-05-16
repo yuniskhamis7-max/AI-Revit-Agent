@@ -1,0 +1,221 @@
+{
+    "columns": [
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                0.0, 
+                0.0
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                26.246719160104988, 
+                0.0
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                52.493438320209968, 
+                0.0
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                78.740157480314963, 
+                0.0
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                0.0, 
+                22.965879200984251
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                26.246719160104988, 
+                22.965879200984251
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                52.493438320209968, 
+                22.965879200984251
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                78.740157480314963, 
+                22.965879200984251
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                0.0, 
+                45.931758401968501
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                26.246719160104988, 
+                45.931758401968501
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                52.493438320209968, 
+                45.931758401968501
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }, 
+        {
+            "base_level": "Ground Floor", 
+            "family": "Rectangular Concrete Column", 
+            "location": [
+                78.740157480314963, 
+                45.931758401968501
+            ], 
+            "top_level": "Roof", 
+            "type": "400x400"
+        }
+    ], 
+    "grids": [
+        {
+            "end": [
+                0.0, 
+                49.212598425196852
+            ], 
+            "name": "A", 
+            "start": [
+                0.0, 
+                -16.404199475065614
+            ]
+        }, 
+        {
+            "end": [
+                26.246719160104988, 
+                49.212598425196852
+            ], 
+            "name": "B", 
+            "start": [
+                26.246719160104988, 
+                -16.404199475065614
+            ]
+        }, 
+        {
+            "end": [
+                52.493438320209968, 
+                49.212598425196852
+            ], 
+            "name": "C", 
+            "start": [
+                52.493438320209968, 
+                -16.404199475065614
+            ]
+        }, 
+        {
+            "end": [
+                78.740157480314963, 
+                49.212598425196852
+            ], 
+            "name": "D", 
+            "start": [
+                78.740157480314963, 
+                -16.404199475065614
+            ]
+        }, 
+        {
+            "end": [
+                98.425196850393704, 
+                0.0
+            ], 
+            "name": "1", 
+            "start": [
+                -16.404199475065614, 
+                0.0
+            ]
+        }, 
+        {
+            "end": [
+                98.425196850393704, 
+                22.965879200984251
+            ], 
+            "name": "2", 
+            "start": [
+                -16.404199475065614, 
+                22.965879200984251
+            ]
+        }, 
+        {
+            "end": [
+                98.425196850393704, 
+                45.931758401968501
+            ], 
+            "name": "3", 
+            "start": [
+                -16.404199475065614, 
+                45.931758401968501
+            ]
+        }
+    ], 
+    "levels": [
+        {
+            "elevation": 0.0, 
+            "name": "Ground Floor"
+        }, 
+        {
+            "elevation": 13.123359580052494, 
+            "name": "Level 2"
+        }, 
+        {
+            "elevation": 26.246719160104988, 
+            "name": "Level 3"
+        }, 
+        {
+            "elevation": 39.370078740157481, 
+            "name": "Roof"
+        }
+    ]
+}

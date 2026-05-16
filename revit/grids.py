@@ -7,8 +7,6 @@ straight grids are supported.
 from Autodesk.Revit.DB import FilteredElementCollector, Grid, Line, XYZ
 
 from revit.transactions import run_in_transaction
-from tools.validators import has_duplicate_name
-
 
 def list_grid_names(document):
     """Return existing grid names from the active Revit document."""
@@ -40,3 +38,10 @@ def create_grid(document, name, start, end):
 def _to_xyz(point):
     """Convert a simple coordinate list into a Revit XYZ point."""
     return XYZ(point[0], point[1], point[2])
+
+
+def has_duplicate_name(name, existing_names):
+    """Return True when name already exists in a case-insensitive list."""
+    if not name:
+        return False
+    return name.strip().lower() in [existing.strip().lower() for existing in existing_names]
