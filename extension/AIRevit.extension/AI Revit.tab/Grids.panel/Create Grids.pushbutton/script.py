@@ -10,14 +10,20 @@ PROJECT_ROOT = os.path.abspath(os.path.join(BUTTON_DIR, "..", "..", "..", "..", 
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from revit.ui import get_active_document, show_execution_result, show_validation_errors
-from run import run_category
+from pyrevit import revit
+from lib.Grids import Grid # Importing from your lib folder
 
+doc = revit.doc
 
-result = run_category(get_active_document(), "grids")
-if result["success"]:
-    show_execution_result(result)
-elif not result.get("results"):
-    show_execution_result(result)
-else:
-    show_validation_errors(result.get("results", []))
+# Initialize a grid object
+grid_1 = Grid(doc, name="1")
+
+# Because we set the default to "PBP", this will automatically 
+# measure 5000mm starting from the Project Base Point!
+grid_1.create_straight(
+    start_pt=(0, 0, 2000), 
+    end_pt=(0, 5000, 2000), 
+    unit="mm"
+)
+
+print("Grid created relative to Project Base Point!")
