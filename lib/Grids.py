@@ -1,88 +1,149 @@
-"""Direct Revit grid helper used by the Create Grids button."""
-
-from Autodesk.Revit.DB import (
-    FilteredElementCollector,
-    Grid as RevitGrid,
-    Line,
-    Transaction,
-    TransactionStatus,
-    XYZ,
-)
-
-
-UNIT_TO_FEET = {
-    "ft": 1.0,
-    "feet": 1.0,
-    "foot": 1.0,
-    "mm": 1.0 / 304.8,
-    "millimeter": 1.0 / 304.8,
-    "millimeters": 1.0 / 304.8,
-    "cm": 1.0 / 30.48,
-    "centimeter": 1.0 / 30.48,
-    "centimeters": 1.0 / 30.48,
-    "m": 1.0 / 0.3048,
-    "meter": 1.0 / 0.3048,
-    "meters": 1.0 / 0.3048,
-}
-
+from pyrevit import revit, DB
 
 class Grid(object):
-    """Small wrapper for creating a named straight Revit grid."""
+    """
+    Represents a Grid in Revit. 
+    Handles coordinate conversions and PBP translation automatically.
+    """
 
-    def __init__(self, document, name):
-        self.document = document
+    def __init__(self, doc, name):
+        self.doc = doc
         self.name = name
+        
+        # When initialized, try to find an existing grid with this name
+        self.revit_element = self._find_existing_grid()
 
-    def create_straight(self, start_pt, end_pt, unit="ft"):
-        """Create one straight grid from start/end coordinates."""
-        if _has_duplicate_name(self.name, _list_grid_names(self.document)):
-            return {
-                "success": False,
-                "message": "Grid already exists: {}".format(self.name),
-                "element_id": None,
-            }
+    @property
+    def exists(self):
+        """Returns True if the grid already exists in the Revit model."""
+        return self.revit_element is not None
 
-        factor = _unit_factor(unit)
-        transaction = Transaction(self.document, "Create Grid {}".format(self.name))
+    # ==========================================
+    # CREATION METHODS
+    # ==========================================
 
-        try:
-            transaction.Start()
-            line = Line.CreateBound(_to_xyz(start_pt, factor), _to_xyz(end_pt, factor))
-            grid = RevitGrid.Create(self.document, line)
-            grid.Name = self.name
-            transaction.Commit()
-            return {
-                "success": True,
-                "message": "Created grid: {}".format(self.name),
-                "element_id": grid.Id.IntegerValue,
-            }
-        except Exception as error:
-            if transaction.GetStatus() == TransactionStatus.Started:
-                transaction.RollBack()
-            return {
-                "success": False,
-                "message": str(error),
-                "element_id": None,
-            }
+    def create_straight(self, start_pt, end_pt, unit="mm", measure_from="PBP"):
+        """Creates a straight grid line in Revit using explicit start and end points."""
+        if self.exists:
+            print("Grid '{}' already exists. Skipping creation.".format(self.name))
+            return False
 
+        start_xyz = self._translate_coordinates(start_pt, unit, measure_from)
+        end_xyz = self._translate_coordinates(end_pt, unit, measure_from)
+        
+        line_curve = DB.Line.CreateBound(start_xyz, end_xyz)
+        return self._commit_to_revit(line_curve)
 
-def _list_grid_names(document):
-    return [grid.Name for grid in FilteredElementCollector(document).OfClass(RevitGrid)]
+    def create_by_length(self, start_pt, direction, length, unit="mm", measure_from="PBP"):
+        """Creates a straight grid by specifying a start point, a direction ('X' or 'Y'), and a total span length."""
+        x, y, z = start_pt
+        
+        if direction.upper() == "X":
+            end_pt = (x + length, y, z)
+        elif direction.upper() == "Y":
+            end_pt = (x, y + length, z)
+        else:
+            raise ValueError("Direction must be 'X' or 'Y'")
+            
+        return self.create_straight(start_pt, end_pt, unit, measure_from)
 
+    def create_by_offset(self, ref_grid, vector, unit="mm"):
+        """Creates a new grid by copying an existing grid and moving it by a specific distance (vector)."""
+        if self.exists:
+            print("Grid '{}' already exists. Skipping creation.".format(self.name))
+            return False
+            
+        if not ref_grid.exists:
+            print("Error: Cannot offset. Reference grid '{}' does not exist yet.".format(ref_grid.name))
+            return False
 
-def _to_xyz(point, factor):
-    return XYZ(point[0] * factor, point[1] * factor, point[2] * factor)
+        original_curve = ref_grid.revit_element.Curve
+        
+        vx, vy, vz = vector
+        if unit.lower() == "mm":
+            vx, vy, vz = vx / 304.8, vy / 304.8, vz / 304.8
+        elif unit.lower() == "m":
+            vx, vy, vz = vx / 0.3048, vy / 0.3048, vz / 0.3048
+            
+        translation_vector = DB.XYZ(vx, vy, vz)
+        transform = DB.Transform.CreateTranslation(translation_vector)
+        new_curve = original_curve.CreateTransformed(transform)
+        
+        return self._commit_to_revit(new_curve)
 
+    def create_arc(self, start_pt, end_pt, center_pt, unit="mm", measure_from="PBP"):
+        """Creates a curved grid in Revit."""
+        if self.exists:
+            print("Grid '{}' already exists. Skipping creation.".format(self.name))
+            return False
 
-def _unit_factor(unit):
-    normalized_unit = (unit or "ft").strip().lower()
-    if normalized_unit not in UNIT_TO_FEET:
-        raise ValueError("Unsupported grid unit: {}".format(unit))
-    return UNIT_TO_FEET[normalized_unit]
+        start_xyz = self._translate_coordinates(start_pt, unit, measure_from)
+        end_xyz = self._translate_coordinates(end_pt, unit, measure_from)
+        center_xyz = self._translate_coordinates(center_pt, unit, measure_from)
+        
+        arc_curve = DB.Arc.Create(start_xyz, end_xyz, center_xyz)
+        return self._commit_to_revit(arc_curve)
 
+    # ==========================================
+    # MODIFICATION METHODS
+    # ==========================================
 
-def _has_duplicate_name(name, existing_names):
-    if not name:
-        return False
-    normalized_name = name.strip().lower()
-    return normalized_name in [existing.strip().lower() for existing in existing_names]
+    def delete(self):
+        if not self.exists: return False
+        with revit.Transaction("Delete Grid {}".format(self.name)):
+            self.doc.Delete(self.revit_element.Id)
+            self.revit_element = None
+        return True
+
+    def rename(self, new_name):
+        if not self.exists: return False
+        with revit.Transaction("Rename Grid {} to {}".format(self.name, new_name)):
+            self.revit_element.Name = new_name
+            self.name = new_name
+        return True
+
+    # ==========================================
+    # PRIVATE HELPER METHODS
+    # ==========================================
+    
+    def _find_existing_grid(self):
+        all_grids = DB.FilteredElementCollector(self.doc).OfClass(DB.Grid).ToElements()
+        for grid in all_grids:
+            if grid.Name == self.name: return grid
+        return None
+
+    def _get_pbp_offset(self):
+        """Finds the Project Base Point and returns its location using its BoundingBox."""
+        pbp = DB.FilteredElementCollector(self.doc).OfCategory(DB.BuiltInCategory.OST_ProjectBasePoint).FirstElement()
+        
+        if pbp:
+            # Safest way to get the exact XYZ of the PBP in the internal coordinate system
+            bbox = pbp.get_BoundingBox(None)
+            if bbox:
+                return bbox.Min
+                
+        # Fallback if no PBP is found
+        return DB.XYZ(0, 0, 0)
+
+    def _translate_coordinates(self, coords, unit, measure_from):
+        x, y, z = coords
+        if unit.lower() == "mm": x, y, z = x / 304.8, y / 304.8, z / 304.8
+        elif unit.lower() == "m": x, y, z = x / 0.3048, y / 0.3048, z / 0.3048
+        
+        if measure_from.upper() == "PBP":
+            pbp_offset = self._get_pbp_offset()
+            x += pbp_offset.X
+            y += pbp_offset.Y
+            z += pbp_offset.Z
+            
+        return DB.XYZ(x, y, z)
+
+    def _commit_to_revit(self, curve):
+        with revit.Transaction("Create Grid {}".format(self.name)):
+            try:
+                self.revit_element = DB.Grid.Create(self.doc, curve)
+                self.revit_element.Name = self.name
+                return True
+            except Exception as e:
+                print("Failed to create grid '{}'. Error: {}".format(self.name, e))
+                return False
