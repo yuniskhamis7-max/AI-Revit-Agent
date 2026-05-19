@@ -3,7 +3,8 @@ clr.AddReference("RevitAPI")
 import Autodesk.Revit.DB as DB
 
 class SimpleTransaction(object):
-    """A safe context manager for Revit Transactions bypassing pyRevit's wrapper."""
+    """Context manager around a native Revit ``DB.Transaction``."""
+
     def __init__(self, doc, name):
         self.doc = doc
         self.name = name
@@ -20,6 +21,8 @@ class SimpleTransaction(object):
             self.t.Commit()
 
 class Level(object):
+    """Small wrapper around Revit level creation, lookup, and modification."""
+
     def __init__(self, doc, name):
         self.doc = doc
         self.name = name
@@ -45,11 +48,13 @@ class Level(object):
     # ==========================================
 
     def create_at_elevation(self, elevation, unit="mm", measure_from="PBP"):
+        """Create this level at an absolute elevation."""
         if self.exists: return False
         elev_internal = self._translate_elevation(elevation, unit, measure_from)
         return self._commit_to_revit(elev_internal)
 
     def create_by_offset(self, ref_level, z_offset, unit="mm"):
+        """Create this level above or below another level."""
         if self.exists or not ref_level.exists: return False
         if unit.lower() == "mm": offset_internal = z_offset / 304.8
         elif unit.lower() == "m": offset_internal = z_offset / 0.3048
@@ -59,6 +64,7 @@ class Level(object):
         return self._commit_to_revit(new_elevation)
 
     def create_from_link(self, link_instance, source_level_name=None):
+        """Create this level by reading a matching level from a linked model."""
         if self.exists: return False
         search_name = source_level_name if source_level_name else self.name
         
@@ -81,7 +87,7 @@ class Level(object):
     # ==========================================
 
     def pin(self):
-        """Pins the level in place (Highly recommended for draftsmen)."""
+        """Pin the level in place."""
         if not self.exists or self.is_pinned: return False
         with SimpleTransaction(self.doc, "Pin Level {}".format(self.name)):
             self.revit_element.Pinned = True
@@ -97,10 +103,7 @@ class Level(object):
     def delete(self):
         """Deletes the level, bypassing pins automatically."""
         if not self.exists: return False
-        
-        # Save name BEFORE deletion to avoid crash in print statements
-        deleted_name = self.revit_element.Name
-        
+
         with SimpleTransaction(self.doc, "Delete Level {}".format(self.name)):
             if self.revit_element.Pinned:
                 self.revit_element.Pinned = False
@@ -110,6 +113,7 @@ class Level(object):
         return True
 
     def rename(self, new_name):
+        """Rename the level and update this wrapper's cached name."""
         if not self.exists: return False
         with SimpleTransaction(self.doc, "Rename Level {} to {}".format(self.name, new_name)):
             self.revit_element.Name = new_name
@@ -121,6 +125,7 @@ class Level(object):
     # ==========================================
 
     def create_floor_plan(self):
+        """Create a floor plan view for this level if a matching view type exists."""
         if not self.exists: return False
         vft = self._get_view_family_type(DB.ViewFamily.FloorPlan)
         if not vft: return False
@@ -131,6 +136,7 @@ class Level(object):
             return True
 
     def create_ceiling_plan(self):
+        """Create a reflected ceiling plan view for this level."""
         if not self.exists: return False
         vft = self._get_view_family_type(DB.ViewFamily.CeilingPlan)
         if not vft: return False
@@ -165,8 +171,6 @@ class Level(object):
         return elev_internal
 
     def _commit_to_revit(self, elevation_internal):
-        # FIX: The try/except is moved OUTSIDE the SimpleTransaction 
-        # so exceptions actually trigger the RollBack() inside __exit__
         try:
             with SimpleTransaction(self.doc, "Create Level {}".format(self.name)):
                 self.revit_element = DB.Level.Create(self.doc, elevation_internal)

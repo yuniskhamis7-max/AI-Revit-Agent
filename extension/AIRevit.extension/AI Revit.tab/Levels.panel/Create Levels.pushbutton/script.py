@@ -1,4 +1,11 @@
 #! python3
+"""pyRevit entrypoint for a sample level setup workflow.
+
+The command creates a small level system, adds floor plans, pins the new levels,
+and optionally removes old levels after user confirmation. Use on a copied model
+while developing.
+"""
+
 import os
 import sys
 
@@ -10,18 +17,17 @@ if PROJECT_ROOT not in sys.path:
 
 import clr
 clr.AddReference("RevitAPI")
-clr.AddReference("RevitAPIUI") # <--- ADDED REQUIRED REFERENCE FOR UI
+clr.AddReference("RevitAPIUI")
 import Autodesk.Revit.DB as DB
-import Autodesk.Revit.UI as UI # <--- ADDED NATIVE REVIT UI
+import Autodesk.Revit.UI as UI
 
-# Safely reload the module only if it has already been loaded into memory
+# Reload during pyRevit development so edits in lib/Levels.py are picked up.
 import importlib
 if 'lib.Levels' in sys.modules:
     importlib.reload(sys.modules['lib.Levels'])
 
 from lib.Levels import Level, SimpleTransaction
 
-# Get Document safely
 doc = __revit__.ActiveUIDocument.Document
 
 # ==========================================
@@ -52,7 +58,7 @@ else:
 
 lvl_first.create_by_offset(ref_level=lvl_ground, z_offset=4500, unit="mm")
 
-# Finalize the new levels (Generate Views and Pin them!)
+# Finalize the new levels by creating floor plans and pinning datums.
 for lvl in new_levels:
     if lvl.exists:
         lvl.create_floor_plan()
@@ -66,7 +72,6 @@ all_existing_levels = DB.FilteredElementCollector(doc).OfClass(DB.Level).ToEleme
 old_levels = [lvl for lvl in all_existing_levels if lvl.Name not in keep_level_names]
 
 if old_levels:
-    # 4a. REPLACED PYREVIT FORMS WITH NATIVE REVIT TASK DIALOG
     msg = "There are {} old levels in this project. Do you want to delete them? (This will bypass pins).".format(len(old_levels))
     
     dialog = UI.TaskDialog("Cleanup Old Levels?")
@@ -75,11 +80,9 @@ if old_levels:
     dialog.CommonButtons = UI.TaskDialogCommonButtons.Yes | UI.TaskDialogCommonButtons.No
     dialog.DefaultButton = UI.TaskDialogResult.No
     
-    # Show dialog to user
     result = dialog.Show()
     user_wants_to_delete = (result == UI.TaskDialogResult.Yes)
 
-    # 4b. DELETE IF USER AGREED
     if user_wants_to_delete:
         with SimpleTransaction(doc, "Delete Old Levels"):
             for old_lvl in old_levels:

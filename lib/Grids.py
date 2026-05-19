@@ -3,6 +3,13 @@ clr.AddReference("RevitAPI")
 import Autodesk.Revit.DB as DB
 
 class Grid(object):
+    """Small wrapper around Revit grid creation and lookup.
+
+    The class keeps Revit API calls deterministic and grouped behind methods
+    that can be reused by pyRevit ribbon buttons. Public methods return
+    ``True``/``False`` so button scripts can decide how much feedback to show.
+    """
+
     def __init__(self, doc, name):
         self.doc = doc
         self.name = name
@@ -17,6 +24,11 @@ class Grid(object):
     # ==========================================
     @classmethod
     def copy_all_from_link(cls, doc, link_instance):
+        """Copy every single-segment grid from a linked Revit model.
+
+        Existing grid names are skipped to avoid duplicate-name failures. The
+        link transform is applied so copied grids land in host coordinates.
+        """
         link_doc = link_instance.GetLinkDocument()
         if not link_doc:
             return []
@@ -26,7 +38,7 @@ class Grid(object):
         
         generated_grids = []
         
-        # FIX: Track existing names in a Python Set before the transaction starts
+        # Track names before the transaction so repeated runs skip duplicates.
         existing_grids = DB.FilteredElementCollector(doc).OfClass(DB.Grid).ToElements()
         existing_names = set([g.Name for g in existing_grids])
         
@@ -34,25 +46,22 @@ class Grid(object):
         t.Start()
         try:
             for ag in arch_grids:
-                # If name is already taken, skip to prevent crash
                 if ag.Name in existing_names:
                     continue
                 
-                # Check if it's a valid curve (avoids MultiSegmentGrid crashes)
+                # Multi-segment grids do not expose a simple Curve.
                 if not hasattr(ag, "Curve") or ag.Curve is None:
                     continue
                 
                 new_curve = ag.Curve.CreateTransformed(transform)
                 new_revit_grid = DB.Grid.Create(doc, new_curve)
                 
-                # FIX: Only rename if Revit didn't automatically guess the right name
                 if new_revit_grid.Name != ag.Name:
                     try:
                         new_revit_grid.Name = ag.Name
                     except Exception as name_err:
                         print("Warning: Could not name grid '{}'. Revit auto-named it '{}'.".format(ag.Name, new_revit_grid.Name))
                 
-                # Add to our tracker so we don't duplicate it in the next loop iteration
                 existing_names.add(new_revit_grid.Name)
                 
                 grid_obj = cls(doc, new_revit_grid.Name)
@@ -70,6 +79,17 @@ class Grid(object):
     # 2. DRAFTING SCENARIOS (Anchor + Offset)
     # ==========================================
     def create_anchor(self, direction, placement_coord, span_reference="Auto", padding=2000, unit="mm", measure_from="PBP"):
+        """Create the first grid line in an axis direction.
+
+        Args:
+            direction: ``"X"`` for horizontal grids or ``"Y"`` for vertical grids.
+            placement_coord: Offset from the selected origin in the opposite axis.
+            span_reference: ``"Auto"``, a Revit link, or ``(min, max)`` span.
+            padding: Extra length added at each end of the span.
+            unit: ``"mm"``, ``"m"``, or Revit internal feet.
+            measure_from: ``"PBP"`` for Project Base Point or any other value
+                for Revit internal origin.
+        """
         if self.exists: return False
 
         min_span, max_span = self._resolve_span(span_reference, direction)
@@ -109,6 +129,7 @@ class Grid(object):
         return self._commit_to_revit(curve)
 
     def create_by_offset(self, ref_grid, vector, unit="mm"):
+        """Create a grid by translating another grid's curve."""
         if self.exists or not ref_grid.exists: return False
         vx, vy, vz = vector
         if unit.lower() == "mm": vx, vy, vz = vx / 304.8, vy / 304.8, vz / 304.8
@@ -119,6 +140,7 @@ class Grid(object):
         return self._commit_to_revit(new_curve)
 
     def pin(self):
+        """Pin the grid in place after creation or copying."""
         if not self.exists or self.revit_element.Pinned: return False
         t = DB.Transaction(self.doc, "Pin Grid {}".format(self.name))
         t.Start()
@@ -130,6 +152,7 @@ class Grid(object):
     # PRIVATE HELPERS
     # ==========================================
     def _resolve_span(self, span_ref, direction):
+        """Resolve a span reference to internal Revit start/end coordinates."""
         if isinstance(span_ref, tuple): return span_ref[0], span_ref[1]
 
         min_pt, max_pt = None, None
@@ -187,7 +210,6 @@ class Grid(object):
         t.Start()
         try:
             self.revit_element = DB.Grid.Create(self.doc, curve)
-            # FIX: Check name safely
             if self.revit_element.Name != self.name:
                 self.revit_element.Name = self.name
             t.Commit()

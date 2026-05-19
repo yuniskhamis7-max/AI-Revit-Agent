@@ -1,32 +1,40 @@
 # AI Revit Agent
 
-AI Revit Agent is a lightweight pyRevit drafting environment. The AI converts a
-human instruction into structured JSON payload data; deterministic Revit tools
-validate and execute only the selected BIM category.
+AI Revit Agent is a work-in-progress pyRevit extension for automating early BIM
+setup tasks in Autodesk Revit. The current code focuses on deterministic Revit
+API helpers for levels and grids, with placeholder ribbon entrypoints for future
+payload generation and column execution.
 
-The AI never generates Revit API code, Python code, transactions, or execution
-steps. It only returns data shaped like:
+The long-term direction is simple: use structured data as the boundary between
+AI-assisted input and Revit execution. Generated data can be reviewed and
+validated before any model changes are made.
 
-```json
-{
-    "levels": [],
-    "grids": [],
-    "columns": []
-}
+## Features
+
+- pyRevit ribbon extension under the `AI Revit` tab.
+- Reusable `Level` helper for creating, offsetting, pinning, renaming, deleting,
+  and creating plan views for Revit levels.
+- Reusable `Grid` helper for creating anchor grids, offset grids, copying grids
+  from linked models, and pinning grids.
+- Example `payload.json` format for future levels, grids, and columns execution.
+- Documentation for setup, architecture, and payload structure.
+
+## Repository Layout
+
+```text
+extension/
+  AIRevit.extension/       pyRevit extension, tab, panels, and button scripts
+lib/
+  Levels.py                Revit level helper
+  Grids.py                 Revit grid helper
+docs/
+  ARCHITECTURE.md          Runtime structure and design notes
+  PAYLOAD_SCHEMA.md        Planned JSON payload contract
+  PYREVIT_SETUP.md         pyRevit installation and troubleshooting
+payload.json               Example payload data
 ```
 
-## Layers
-
-- `extension/` contains the pyRevit ribbon buttons.
-- `ai/` converts instructions into JSON payloads using Gemini.
-- `revit/` contains deterministic Revit operations and pyRevit UI only.
-- `run.py` saves `payload.json`, validates it, logs runs, and executes button flow.
-- `payload.json` is the current generated payload.
-
-No agents, memory systems, databases, async workers, or orchestration framework
-are included.
-
-## Ribbon
+## Ribbon Buttons
 
 The `AI Revit` tab contains four panels:
 
@@ -35,64 +43,61 @@ The `AI Revit` tab contains four panels:
 - `Grids` -> `Create Grids`
 - `Columns` -> `Create Columns`
 
-`Generate Payload` is the only button that asks for a natural-language
-instruction. It asks the AI to generate a full payload that can contain levels,
-grids, and columns, then saves it to `payload.json`.
+Current status:
 
-The category buttons do not ask for instructions. They load the current payload,
-preview only their category section, validate only that category, and execute
-only that category after approval.
+- `Create Levels` runs a sample level creation workflow.
+- `Create Grids` runs demonstration grid workflows for manual testing.
+- `Generate Payload` and `Create Columns` are placeholder entrypoints.
 
-## AI Setup
+## Setup
 
-The AI layer uses Gemini 2.5 Flash. A project key is configured in
-`ai/parser.py`, and you can override it with an environment variable:
+See [docs/PYREVIT_SETUP.md](docs/PYREVIT_SETUP.md) for pyRevit setup and
+troubleshooting.
 
-```powershell
-$env:GEMINI_API_KEY = "your_api_key"
-```
+Short version:
 
-Optional model override:
+1. Clone this repository.
+2. Add `extension/AIRevit.extension` as a pyRevit extension path.
+3. Reload pyRevit.
+4. Open Revit and use the `AI Revit` tab.
 
-```powershell
-$env:GEMINI_MODEL = "gemini-2.5-flash"
-```
+## Safety
 
-The current AI-generated payload is saved at `payload.json`.
-Runtime logs are written to `logs/runtime/ai_revit_agent.log`.
+These commands can create, rename, pin, and optionally delete Revit elements.
+Develop and test on a copied model until the workflow is stable for your office
+standards.
 
-## How To Test
+## Documentation
 
-AI instruction parsing: click `Generate Payload` and enter a clear instruction
-such as `Create two levels named Level 1 and Level 2 spaced 4000 mm apart`.
+- [Architecture](docs/ARCHITECTURE.md)
+- [Payload Schema](docs/PAYLOAD_SCHEMA.md)
+- [pyRevit Setup](docs/PYREVIT_SETUP.md)
+- [Contributing](CONTRIBUTING.md)
 
-Payload generation: inspect `payload.json` after the AI call. It
-should contain only `levels`, `grids`, and `columns` arrays.
+## Project Name Ideas
 
-Payload preview: after generation, the dialog should show the full generated
-payload. Category execution buttons should then preview only their own section.
+The best GitHub-ready name is **Revit Structure Starter** because the current
+code creates foundational structural setup elements: levels, grids, and future
+columns.
 
-Category-based execution: enter a mixed instruction containing levels, grids,
-and columns. Click one category button and confirm unrelated categories do not
-execute.
+Other good options:
 
-Levels-only execution: click `Create Levels` with generated level payloads.
-Only levels should be created.
+- **Revit Layout Agent**
+- **BIM Scaffold**
+- **Revit Setup Assistant**
+- **GridLevel AI**
+- **Revit Datum Builder**
 
-Grids-only execution: click `Create Grids` with generated grid payloads. Only
-grids should be created.
+## Roadmap
 
-Columns-only execution: click `Create Columns` with generated column payloads.
-Referenced levels and the family/type must exist in the model.
+- Connect `Generate Payload` to a real parser or AI provider.
+- Validate `payload.json` before model execution.
+- Implement payload-driven level, grid, and column creation buttons.
+- Add dry-run previews before committing Revit transactions.
+- Add automated validation tests for pure-Python payload logic once that layer
+  exists outside Revit.
 
-Validation failures: ask for invalid data or manually edit
-`payload.json` during development, then run the relevant button.
-Missing required fields or invalid points/elevations should stop before
-execution.
+## License
 
-Duplicate detection: run the same level or grid request twice. The second run
-should fail with a duplicate-name validation message.
-
-Logging behavior: inspect `logs/runtime/ai_revit_agent.log` for user
-instructions, AI payloads, validation failures, approvals, and execution
-results.
+No license has been selected yet. Add a `LICENSE` file before publishing if you
+want others to use, modify, or redistribute the project.

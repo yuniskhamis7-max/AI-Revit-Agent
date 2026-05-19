@@ -1,4 +1,9 @@
-"""pyRevit entrypoint for AI payload generation."""
+"""pyRevit entrypoint for future AI payload generation.
+
+This placeholder only prepares imports from the repository root. The intended
+next step is to turn a user instruction into the schema documented in
+``docs/PAYLOAD_SCHEMA.md`` and save it as ``payload.json`` for review.
+"""
 
 import os
 import sys

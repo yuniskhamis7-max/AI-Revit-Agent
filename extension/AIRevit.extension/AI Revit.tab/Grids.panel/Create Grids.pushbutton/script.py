@@ -1,4 +1,11 @@
 #! python3
+"""pyRevit entrypoint for manual grid creation experiments.
+
+This button currently runs several demonstration scenarios against the active
+model. Treat it as a development command until it is replaced by payload-driven
+execution.
+"""
+
 import os
 import sys
 
@@ -21,7 +28,11 @@ doc = __revit__.ActiveUIDocument.Document
 links = DB.FilteredElementCollector(doc).OfClass(DB.RevitLinkInstance).ToElements()
 
 # ==============================================================================
-# CHOOSE YOUR SCENARIO HERE (Change the number to test different setups)
+# Development scenarios
+#
+# The loop intentionally exercises every scenario for quick manual testing. For
+# a production button, replace this with explicit user selection or payload
+# validation before writing to the Revit document.
 # ==============================================================================
 
 for ACTIVE_SCENARIO in range(1, 6):
@@ -59,7 +70,7 @@ for ACTIVE_SCENARIO in range(1, 6):
         else:
             main_link = links[0]
             
-            # This single line reads the link, gets all names, and duplicates them!
+            # Read all eligible grid names from the link and duplicate them.
             copied_grids = Grid.copy_all_from_link(doc, main_link)
             
             for cg in copied_grids:

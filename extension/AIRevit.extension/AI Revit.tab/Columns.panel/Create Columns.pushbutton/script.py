@@ -1,4 +1,9 @@
-"""pyRevit entrypoint for column payload execution."""
+"""pyRevit entrypoint for future column payload execution.
+
+This placeholder only prepares imports from the repository root. The intended
+next step is to load validated column entries from ``payload.json`` and place
+matching Revit family instances between existing levels.
+"""
 
 import os
 import sys
