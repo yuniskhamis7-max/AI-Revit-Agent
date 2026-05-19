@@ -1,4 +1,7 @@
-from pyrevit import revit, DB
+import clr
+
+clr.AddReference("RevitAPI")
+from Autodesk.Revit import DB
 
 class Grid(object):
     """
@@ -90,16 +93,28 @@ class Grid(object):
 
     def delete(self):
         if not self.exists: return False
-        with revit.Transaction("Delete Grid {}".format(self.name)):
+        transaction = DB.Transaction(self.doc, "Delete Grid {}".format(self.name))
+        transaction.Start()
+        try:
             self.doc.Delete(self.revit_element.Id)
             self.revit_element = None
+            transaction.Commit()
+        except Exception:
+            transaction.RollBack()
+            raise
         return True
 
     def rename(self, new_name):
         if not self.exists: return False
-        with revit.Transaction("Rename Grid {} to {}".format(self.name, new_name)):
+        transaction = DB.Transaction(self.doc, "Rename Grid {} to {}".format(self.name, new_name))
+        transaction.Start()
+        try:
             self.revit_element.Name = new_name
             self.name = new_name
+            transaction.Commit()
+        except Exception:
+            transaction.RollBack()
+            raise
         return True
 
     # ==========================================
@@ -139,11 +154,14 @@ class Grid(object):
         return DB.XYZ(x, y, z)
 
     def _commit_to_revit(self, curve):
-        with revit.Transaction("Create Grid {}".format(self.name)):
-            try:
-                self.revit_element = DB.Grid.Create(self.doc, curve)
-                self.revit_element.Name = self.name
-                return True
-            except Exception as e:
-                print("Failed to create grid '{}'. Error: {}".format(self.name, e))
-                return False
+        transaction = DB.Transaction(self.doc, "Create Grid {}".format(self.name))
+        transaction.Start()
+        try:
+            self.revit_element = DB.Grid.Create(self.doc, curve)
+            self.revit_element.Name = self.name
+            transaction.Commit()
+            return True
+        except Exception as e:
+            transaction.RollBack()
+            print("Failed to create grid '{}'. Error: {}".format(self.name, e))
+            return False

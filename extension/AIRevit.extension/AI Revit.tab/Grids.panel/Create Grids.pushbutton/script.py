@@ -1,4 +1,4 @@
-"""pyRevit entrypoint for grid payload execution."""
+#! python3
 
 import os
 import sys
@@ -9,10 +9,9 @@ PROJECT_ROOT = os.path.abspath(os.path.join(BUTTON_DIR, "..", "..", "..", "..", 
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from pyrevit import revit
 from lib.Grids import Grid 
 
-doc = revit.doc
+doc = __revit__.ActiveUIDocument.Document
 
 # ==========================================
 # 1. HORIZONTAL GRIDS (1, 2, 3, 4)
