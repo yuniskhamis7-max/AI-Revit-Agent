@@ -1,167 +1,198 @@
 import clr
-
 clr.AddReference("RevitAPI")
-from Autodesk.Revit import DB
+import Autodesk.Revit.DB as DB
 
 class Grid(object):
-    """
-    Represents a Grid in Revit. 
-    Handles coordinate conversions and PBP translation automatically.
-    """
-
     def __init__(self, doc, name):
         self.doc = doc
         self.name = name
-        
-        # When initialized, try to find an existing grid with this name
         self.revit_element = self._find_existing_grid()
 
     @property
     def exists(self):
-        """Returns True if the grid already exists in the Revit model."""
         return self.revit_element is not None
 
     # ==========================================
-    # CREATION METHODS
+    # 1. COPY SCENARIOS (Copy/Monitor style)
     # ==========================================
+    @classmethod
+    def copy_all_from_link(cls, doc, link_instance):
+        link_doc = link_instance.GetLinkDocument()
+        if not link_doc:
+            return []
 
-    def create_straight(self, start_pt, end_pt, unit="mm", measure_from="PBP"):
-        """Creates a straight grid line in Revit using explicit start and end points."""
-        if self.exists:
-            print("Grid '{}' already exists. Skipping creation.".format(self.name))
-            return False
-
-        start_xyz = self._translate_coordinates(start_pt, unit, measure_from)
-        end_xyz = self._translate_coordinates(end_pt, unit, measure_from)
+        arch_grids = DB.FilteredElementCollector(link_doc).OfClass(DB.Grid).ToElements()
+        transform = link_instance.GetTotalTransform()
         
-        line_curve = DB.Line.CreateBound(start_xyz, end_xyz)
-        return self._commit_to_revit(line_curve)
+        generated_grids = []
+        
+        # FIX: Track existing names in a Python Set before the transaction starts
+        existing_grids = DB.FilteredElementCollector(doc).OfClass(DB.Grid).ToElements()
+        existing_names = set([g.Name for g in existing_grids])
+        
+        t = DB.Transaction(doc, "Copy All Grids from Link")
+        t.Start()
+        try:
+            for ag in arch_grids:
+                # If name is already taken, skip to prevent crash
+                if ag.Name in existing_names:
+                    continue
+                
+                # Check if it's a valid curve (avoids MultiSegmentGrid crashes)
+                if not hasattr(ag, "Curve") or ag.Curve is None:
+                    continue
+                
+                new_curve = ag.Curve.CreateTransformed(transform)
+                new_revit_grid = DB.Grid.Create(doc, new_curve)
+                
+                # FIX: Only rename if Revit didn't automatically guess the right name
+                if new_revit_grid.Name != ag.Name:
+                    try:
+                        new_revit_grid.Name = ag.Name
+                    except Exception as name_err:
+                        print("Warning: Could not name grid '{}'. Revit auto-named it '{}'.".format(ag.Name, new_revit_grid.Name))
+                
+                # Add to our tracker so we don't duplicate it in the next loop iteration
+                existing_names.add(new_revit_grid.Name)
+                
+                grid_obj = cls(doc, new_revit_grid.Name)
+                grid_obj.revit_element = new_revit_grid
+                generated_grids.append(grid_obj)
+                
+            t.Commit()
+        except Exception as e:
+            t.RollBack()
+            print("Failed to copy grids: {}".format(e))
+            
+        return generated_grids
 
-    def create_by_length(self, start_pt, direction, length, unit="mm", measure_from="PBP"):
-        """Creates a straight grid by specifying a start point, a direction ('X' or 'Y'), and a total span length."""
-        x, y, z = start_pt
+    # ==========================================
+    # 2. DRAFTING SCENARIOS (Anchor + Offset)
+    # ==========================================
+    def create_anchor(self, direction, placement_coord, span_reference="Auto", padding=2000, unit="mm", measure_from="PBP"):
+        if self.exists: return False
+
+        min_span, max_span = self._resolve_span(span_reference, direction)
+
+        coord_int = placement_coord
+        pad_int = padding
+        if unit.lower() == "mm":
+            coord_int /= 304.8
+            pad_int /= 304.8
+            if isinstance(span_reference, tuple):
+                min_span /= 304.8
+                max_span /= 304.8
+        elif unit.lower() == "m":
+            coord_int /= 0.3048
+            pad_int /= 0.3048
+            if isinstance(span_reference, tuple):
+                min_span /= 0.3048
+                max_span /= 0.3048
+
+        pbp_offset = self._get_pbp_offset() if measure_from.upper() == "PBP" else DB.XYZ(0,0,0)
+        z = pbp_offset.Z
         
         if direction.upper() == "X":
-            end_pt = (x + length, y, z)
+            y = coord_int + pbp_offset.Y
+            start_x = (min_span + pbp_offset.X) - pad_int
+            end_x   = (max_span + pbp_offset.X) + pad_int
+            curve = DB.Line.CreateBound(DB.XYZ(start_x, y, z), DB.XYZ(end_x, y, z))
+            
         elif direction.upper() == "Y":
-            end_pt = (x, y + length, z)
+            x = coord_int + pbp_offset.X
+            start_y = (min_span + pbp_offset.Y) - pad_int
+            end_y   = (max_span + pbp_offset.Y) + pad_int
+            curve = DB.Line.CreateBound(DB.XYZ(x, start_y, z), DB.XYZ(x, end_y, z))
         else:
             raise ValueError("Direction must be 'X' or 'Y'")
-            
-        return self.create_straight(start_pt, end_pt, unit, measure_from)
+
+        return self._commit_to_revit(curve)
 
     def create_by_offset(self, ref_grid, vector, unit="mm"):
-        """Creates a new grid by copying an existing grid and moving it by a specific distance (vector)."""
-        if self.exists:
-            print("Grid '{}' already exists. Skipping creation.".format(self.name))
-            return False
-            
-        if not ref_grid.exists:
-            print("Error: Cannot offset. Reference grid '{}' does not exist yet.".format(ref_grid.name))
-            return False
-
-        original_curve = ref_grid.revit_element.Curve
-        
+        if self.exists or not ref_grid.exists: return False
         vx, vy, vz = vector
-        if unit.lower() == "mm":
-            vx, vy, vz = vx / 304.8, vy / 304.8, vz / 304.8
-        elif unit.lower() == "m":
-            vx, vy, vz = vx / 0.3048, vy / 0.3048, vz / 0.3048
+        if unit.lower() == "mm": vx, vy, vz = vx / 304.8, vy / 304.8, vz / 304.8
+        elif unit.lower() == "m": vx, vy, vz = vx / 0.3048, vy / 0.3048, vz / 0.3048
             
-        translation_vector = DB.XYZ(vx, vy, vz)
-        transform = DB.Transform.CreateTranslation(translation_vector)
-        new_curve = original_curve.CreateTransformed(transform)
-        
+        transform = DB.Transform.CreateTranslation(DB.XYZ(vx, vy, vz))
+        new_curve = ref_grid.revit_element.Curve.CreateTransformed(transform)
         return self._commit_to_revit(new_curve)
 
-    def create_arc(self, start_pt, end_pt, center_pt, unit="mm", measure_from="PBP"):
-        """Creates a curved grid in Revit."""
-        if self.exists:
-            print("Grid '{}' already exists. Skipping creation.".format(self.name))
-            return False
+    def pin(self):
+        if not self.exists or self.revit_element.Pinned: return False
+        t = DB.Transaction(self.doc, "Pin Grid {}".format(self.name))
+        t.Start()
+        self.revit_element.Pinned = True
+        t.Commit()
+        return True
 
-        start_xyz = self._translate_coordinates(start_pt, unit, measure_from)
-        end_xyz = self._translate_coordinates(end_pt, unit, measure_from)
-        center_xyz = self._translate_coordinates(center_pt, unit, measure_from)
+    # ==========================================
+    # PRIVATE HELPERS
+    # ==========================================
+    def _resolve_span(self, span_ref, direction):
+        if isinstance(span_ref, tuple): return span_ref[0], span_ref[1]
+
+        min_pt, max_pt = None, None
         
-        arc_curve = DB.Arc.Create(start_xyz, end_xyz, center_xyz)
-        return self._commit_to_revit(arc_curve)
+        if hasattr(span_ref, "GetTotalTransform"): 
+            bbox = span_ref.get_BoundingBox(None)
+            if bbox: min_pt, max_pt = bbox.Min, bbox.Max
+            
+        elif span_ref == "Auto":
+            links = DB.FilteredElementCollector(self.doc).OfClass(DB.RevitLinkInstance).ToElements()
+            if links:
+                min_x, min_y = float('inf'), float('inf')
+                max_x, max_y = float('-inf'), float('-inf')
+                for link in links:
+                    bbox = link.get_BoundingBox(None)
+                    if bbox:
+                        min_x, min_y = min(min_x, bbox.Min.X), min(min_y, bbox.Min.Y)
+                        max_x, max_y = max(max_x, bbox.Max.X), max(max_y, bbox.Max.Y)
+                if min_x != float('inf'):
+                    min_pt, max_pt = DB.XYZ(min_x, min_y, 0), DB.XYZ(max_x, max_y, 0)
+            
+            if not min_pt: 
+                levels = DB.FilteredElementCollector(self.doc).OfClass(DB.Level).ToElements()
+                if levels:
+                    min_x, min_y = float('inf'), float('inf')
+                    max_x, max_y = float('-inf'), float('-inf')
+                    for lvl in levels:
+                        bbox = lvl.get_BoundingBox(None)
+                        if bbox:
+                            min_x, min_y = min(min_x, bbox.Min.X), min(min_y, bbox.Min.Y)
+                            max_x, max_y = max(max_x, bbox.Max.X), max(max_y, bbox.Max.Y)
+                    if min_x != float('inf'):
+                        min_pt, max_pt = DB.XYZ(min_x, min_y, 0), DB.XYZ(max_x, max_y, 0)
 
-    # ==========================================
-    # MODIFICATION METHODS
-    # ==========================================
+        if min_pt and max_pt:
+            if direction.upper() == "X": return min_pt.X, max_pt.X
+            if direction.upper() == "Y": return min_pt.Y, max_pt.Y
+            
+        fallback = 50000 / 304.8
+        return -fallback, fallback
 
-    def delete(self):
-        if not self.exists: return False
-        transaction = DB.Transaction(self.doc, "Delete Grid {}".format(self.name))
-        transaction.Start()
-        try:
-            self.doc.Delete(self.revit_element.Id)
-            self.revit_element = None
-            transaction.Commit()
-        except Exception:
-            transaction.RollBack()
-            raise
-        return True
+    def _get_pbp_offset(self):
+        pbp = DB.FilteredElementCollector(self.doc).OfCategory(DB.BuiltInCategory.OST_ProjectBasePoint).FirstElement()
+        if pbp and pbp.get_BoundingBox(None): return pbp.get_BoundingBox(None).Min
+        return DB.XYZ(0, 0, 0)
 
-    def rename(self, new_name):
-        if not self.exists: return False
-        transaction = DB.Transaction(self.doc, "Rename Grid {} to {}".format(self.name, new_name))
-        transaction.Start()
-        try:
-            self.revit_element.Name = new_name
-            self.name = new_name
-            transaction.Commit()
-        except Exception:
-            transaction.RollBack()
-            raise
-        return True
-
-    # ==========================================
-    # PRIVATE HELPER METHODS
-    # ==========================================
-    
     def _find_existing_grid(self):
         all_grids = DB.FilteredElementCollector(self.doc).OfClass(DB.Grid).ToElements()
         for grid in all_grids:
             if grid.Name == self.name: return grid
         return None
 
-    def _get_pbp_offset(self):
-        """Finds the Project Base Point and returns its location using its BoundingBox."""
-        pbp = DB.FilteredElementCollector(self.doc).OfCategory(DB.BuiltInCategory.OST_ProjectBasePoint).FirstElement()
-        
-        if pbp:
-            # Safest way to get the exact XYZ of the PBP in the internal coordinate system
-            bbox = pbp.get_BoundingBox(None)
-            if bbox:
-                return bbox.Min
-                
-        # Fallback if no PBP is found
-        return DB.XYZ(0, 0, 0)
-
-    def _translate_coordinates(self, coords, unit, measure_from):
-        x, y, z = coords
-        if unit.lower() == "mm": x, y, z = x / 304.8, y / 304.8, z / 304.8
-        elif unit.lower() == "m": x, y, z = x / 0.3048, y / 0.3048, z / 0.3048
-        
-        if measure_from.upper() == "PBP":
-            pbp_offset = self._get_pbp_offset()
-            x += pbp_offset.X
-            y += pbp_offset.Y
-            z += pbp_offset.Z
-            
-        return DB.XYZ(x, y, z)
-
     def _commit_to_revit(self, curve):
-        transaction = DB.Transaction(self.doc, "Create Grid {}".format(self.name))
-        transaction.Start()
+        t = DB.Transaction(self.doc, "Create Grid {}".format(self.name))
+        t.Start()
         try:
             self.revit_element = DB.Grid.Create(self.doc, curve)
-            self.revit_element.Name = self.name
-            transaction.Commit()
+            # FIX: Check name safely
+            if self.revit_element.Name != self.name:
+                self.revit_element.Name = self.name
+            t.Commit()
             return True
         except Exception as e:
-            transaction.RollBack()
+            t.RollBack()
             print("Failed to create grid '{}'. Error: {}".format(self.name, e))
             return False
