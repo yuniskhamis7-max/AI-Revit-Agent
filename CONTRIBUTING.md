@@ -10,11 +10,15 @@ Thanks for helping improve this project.
   thin.
 - Keep payload-driven execution deterministic: generated data should be
   validated before any document changes are made.
+- Keep DTOs and payload documentation in sync whenever the JSON shape changes.
+- Preserve existing Revit elements by default unless a command is clearly named
+  and documented as destructive.
 
 ## Pull Request Checklist
 
 - The README still matches the current repository structure.
 - New user-facing behavior is documented.
+- `docs/PAYLOAD_SCHEMA.md` matches `lib/dtos.py` and `lib/payload_manager.py`.
 - Revit commands fail clearly when required levels, grids, links, families, or
   types are missing.
 - Temporary model files, logs, and local `.addin` files are not committed.

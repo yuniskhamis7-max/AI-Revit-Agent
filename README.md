@@ -1,53 +1,62 @@
 # AI Revit Agent
 
-AI Revit Agent is a work-in-progress pyRevit extension for automating early BIM
-setup tasks in Autodesk Revit. The current code focuses on deterministic Revit
-API helpers for levels and grids, with placeholder ribbon entrypoints for future
-payload generation and column execution.
+AI Revit Agent is a pyRevit extension for generating early structural setup
+elements in Autodesk Revit from structured project data. The current
+implementation focuses on a deterministic pipeline for levels and grids:
+payload JSON is parsed into typed data objects, then Revit manager classes create
+or update model elements inside a single transaction.
 
-The long-term direction is simple: use structured data as the boundary between
-AI-assisted input and Revit execution. Generated data can be reviewed and
-validated before any model changes are made.
+The project is intentionally conservative at the Revit boundary. AI-assisted
+input should become validated JSON first; only validated data should reach the
+Revit API.
 
-## Features
+## Current Features
 
 - pyRevit ribbon extension under the `AI Revit` tab.
-- Reusable `Level` helper for creating, offsetting, pinning, renaming, deleting,
-  and creating plan views for Revit levels.
-- Reusable `Grid` helper for creating anchor grids, offset grids, copying grids
-  from linked models, and pinning grids.
-- Example `payload.json` format for future levels, grids, and columns execution.
+- `Build From AI` command that parses a sample JSON payload and generates levels
+  and grids.
+- Typed payload DTOs for project, level, grid, and point data.
+- `PayloadManager` for parsing raw JSON into typed project data.
+- `LevelManager` for creating or updating levels, pinning them, and creating
+  floor plan views when requested.
+- `GridManager` for creating safe grid lines, preserving existing grids by
+  default, and pinning generated grids.
+- Placeholder column button for a future payload-driven column workflow.
 - Documentation for setup, architecture, and payload structure.
 
 ## Repository Layout
 
 ```text
 extension/
-  AIRevit.extension/       pyRevit extension, tab, panels, and button scripts
+  AIRevit.extension/                 pyRevit extension, tab, panels, and buttons
 lib/
-  Levels.py                Revit level helper
-  Grids.py                 Revit grid helper
+  dtos.py                            Typed payload data objects
+  payload_manager.py                 JSON parsing and payload mapping
+  revit_managers/
+    level_manager.py                 Revit level creation/update behavior
+    grid_manager.py                  Revit grid creation/update behavior
 docs/
-  ARCHITECTURE.md          Runtime structure and design notes
-  PAYLOAD_SCHEMA.md        Planned JSON payload contract
-  PYREVIT_SETUP.md         pyRevit installation and troubleshooting
-payload.json               Example payload data
+  ARCHITECTURE.md                    Runtime structure and design notes
+  PAYLOAD_SCHEMA.md                  JSON payload contract
+  PYREVIT_SETUP.md                   pyRevit installation and troubleshooting
+payload.json                         Example payload data
+CONTRIBUTING.md                      Contribution guidelines
 ```
 
 ## Ribbon Buttons
 
-The `AI Revit` tab contains four panels:
+The extension is organized around these pyRevit panels:
 
-- `Payload` -> `Generate Payload`
+- `Generation` -> `Build From AI`
 - `Levels` -> `Create Levels`
 - `Grids` -> `Create Grids`
 - `Columns` -> `Create Columns`
 
 Current status:
 
-- `Create Levels` runs a sample level creation workflow.
-- `Create Grids` runs demonstration grid workflows for manual testing.
-- `Generate Payload` and `Create Columns` are placeholder entrypoints.
+- `Build From AI` is the active end-to-end command for level and grid generation.
+- `Create Levels` and `Create Grids` are currently inactive button stubs.
+- `Create Columns` is a placeholder entrypoint for future column placement.
 
 ## Setup
 
@@ -61,11 +70,21 @@ Short version:
 3. Reload pyRevit.
 4. Open Revit and use the `AI Revit` tab.
 
+## Payloads
+
+The payload layer currently supports `levels` and `grids`. The sample
+`payload.json` also includes columns as a future target, but column entries are
+not executed yet.
+
+See [docs/PAYLOAD_SCHEMA.md](docs/PAYLOAD_SCHEMA.md) for the expected JSON
+shape.
+
 ## Safety
 
-These commands can create, rename, pin, and optionally delete Revit elements.
-Develop and test on a copied model until the workflow is stable for your office
-standards.
+These commands can create, update, pin, and rename Revit elements. Develop and
+test on a copied model until the workflow is stable for your office standards.
+Existing grids are preserved by the current grid manager unless a force-recreate
+path is explicitly used in code.
 
 ## Documentation
 
@@ -74,28 +93,14 @@ standards.
 - [pyRevit Setup](docs/PYREVIT_SETUP.md)
 - [Contributing](CONTRIBUTING.md)
 
-## Project Name Ideas
-
-The best GitHub-ready name is **Revit Structure Starter** because the current
-code creates foundational structural setup elements: levels, grids, and future
-columns.
-
-Other good options:
-
-- **Revit Layout Agent**
-- **BIM Scaffold**
-- **Revit Setup Assistant**
-- **GridLevel AI**
-- **Revit Datum Builder**
-
 ## Roadmap
 
-- Connect `Generate Payload` to a real parser or AI provider.
-- Validate `payload.json` before model execution.
-- Implement payload-driven level, grid, and column creation buttons.
+- Replace the embedded sample payload in `Build From AI` with a real payload
+  source.
+- Add stricter payload validation and user-facing validation messages.
+- Implement payload-driven column placement.
 - Add dry-run previews before committing Revit transactions.
-- Add automated validation tests for pure-Python payload logic once that layer
-  exists outside Revit.
+- Add automated tests for pure-Python payload parsing and validation.
 
 ## License
 
