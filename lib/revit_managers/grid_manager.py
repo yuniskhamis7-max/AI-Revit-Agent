@@ -1,74 +1,53 @@
 import Autodesk.Revit.DB as DB
-from dtos import GridData, Point2D
+from dtos import GridData
 
 class GridManager:
-    """Defensive toolkit for Revit Grid generation. Prevents destructive overwrites."""
-    
     MINIMUM_LINE_LENGTH = 0.004 
 
-    def __init__(self, doc: DB.Document):
+    def __init__(self, doc: DB.Document, use_pbp: bool = True):
         self.doc = doc
+        self.use_pbp = use_pbp
         self._grid_cache = self._build_grid_cache()
+        self.base_offset = self._get_pbp_offset() if use_pbp else DB.XYZ.Zero
+
+    def _get_pbp_offset(self) -> DB.XYZ:
+        pbp_col = DB.FilteredElementCollector(self.doc).OfCategory(DB.BuiltInCategory.OST_ProjectBasePoint).WhereElementIsNotElementType().FirstElement()
+        if pbp_col:
+            bbox = pbp_col.get_BoundingBox(None)
+            if bbox:
+                return DB.XYZ(bbox.Min.X, bbox.Min.Y, 0.0)
+        return DB.XYZ.Zero
 
     def _build_grid_cache(self):
         grids = DB.FilteredElementCollector(self.doc).OfClass(DB.Grid).ToElements()
         return {grid.Name: grid for grid in grids}
 
     def process_from_payload(self, grid_data: GridData) -> DB.Grid:
-        """Safely creates grids, bypassing if they already exist to protect dimensions."""
         existing_grid = self._grid_cache.get(grid_data.name)
-
         if existing_grid:
             self.pin(existing_grid, grid_data.is_pinned)
             return existing_grid
 
-        dist = grid_data.start.distance_to(grid_data.end)
-        if dist < self.MINIMUM_LINE_LENGTH:
-            print(f"ERROR: Points too close for Grid '{grid_data.name}'. Skipped.")
-            return None
-
-        new_grid = self.create(grid_data.name, grid_data.start, grid_data.end)
-        if new_grid:
-            self.pin(new_grid, grid_data.is_pinned)
-            
-        return new_grid
-
-    def create(self, name: str, start: Point2D, end: Point2D) -> DB.Grid:
-        start_xyz = DB.XYZ(start.x, start.y, 0.0)
-        end_xyz = DB.XYZ(end.x, end.y, 0.0)
+        start_xyz = DB.XYZ(grid_data.start.x, grid_data.start.y, 0.0) + self.base_offset
+        end_xyz = DB.XYZ(grid_data.end.x, grid_data.end.y, 0.0) + self.base_offset
 
         try:
             line = DB.Line.CreateBound(start_xyz, end_xyz)
             new_grid = DB.Grid.Create(self.doc, line)
             
             try:
-                new_grid.Name = name
-            except Exception as e:
-                pass # Accept default Revit naming if conflict occurs
-
+                new_grid.Name = grid_data.name
+            except:
+                pass 
+            
+            self.pin(new_grid, grid_data.is_pinned)
             self._grid_cache[new_grid.Name] = new_grid
             return new_grid
             
         except Exception as e:
-            print(f"Fatal error creating Grid '{name}': {e}")
+            print(f"Error creating Grid '{grid_data.name}': {e}")
             return None
 
     def pin(self, grid: DB.Grid, state: bool = True):
         if grid and grid.Pinned != state:
             grid.Pinned = state
-
-    def rename(self, grid: DB.Grid, new_name: str):
-        if new_name in self._grid_cache:
-            raise ValueError(f"A grid named '{new_name}' already exists.")
-        
-        self._grid_cache.pop(grid.Name, None)
-        grid.Name = new_name
-        self._grid_cache[new_name] = grid
-
-    def force_recreate(self, grid_data: GridData):
-        """DANGER: Wipes grid and attached dimensions to recreate from scratch."""
-        existing_grid = self._grid_cache.get(grid_data.name)
-        if existing_grid:
-            self.doc.Delete(existing_grid.Id)
-            self._grid_cache.pop(grid_data.name, None)
-        return self.process_from_payload(grid_data)

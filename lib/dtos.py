@@ -6,9 +6,8 @@ from typing import List, Optional
 class Point2D:
     x: float
     y: float
-
+    
     def distance_to(self, other: 'Point2D') -> float:
-        """Helper to calculate distance between two points."""
         return math.sqrt((self.x - other.x)**2 + (self.y - other.y)**2)
 
 @dataclass
@@ -26,7 +25,27 @@ class GridData:
     is_pinned: bool = True
 
 @dataclass
+class LevelStrategy:
+    mode: str = "explicit"  # "explicit" or "link"
+    link_name: Optional[str] = None
+    prefix_copied_levels: str = ""
+
+@dataclass
+class GridStrategy:
+    mode: str = "explicit"  # "explicit" or "link"
+    link_name: Optional[str] = None
+    prefix_copied_grids: str = ""
+
+@dataclass
+class ProjectSettings:
+    grids_unit: str = "m"   
+    levels_unit: str = "m"  
+    use_project_base_point: bool = True
+
+@dataclass
 class ProjectData:
-    """The master schema representing the entire AI payload."""
+    settings: ProjectSettings = field(default_factory=ProjectSettings)
+    level_strategy: LevelStrategy = field(default_factory=LevelStrategy)
+    grid_strategy: GridStrategy = field(default_factory=GridStrategy)
     levels: List[LevelData] = field(default_factory=list)
     grids: List[GridData] = field(default_factory=list)
