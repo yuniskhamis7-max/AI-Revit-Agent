@@ -10,12 +10,11 @@ import importlib
 from System.Windows.Forms import DialogResult
 import Autodesk.Revit.DB as DB
 
-# Resolve project directories
+# Setup project library search paths
 current_dir = os.path.dirname(__file__)
 project_root = os.path.abspath(os.path.join(current_dir, "../../../../../"))
 lib_root = os.path.join(project_root, "airevitlib")
 
-# Inject all subfolders directly into search paths to support reliable flat imports
 subfolders = [
     lib_root,
     os.path.join(lib_root, "core"),
@@ -28,9 +27,10 @@ for folder in subfolders:
     if folder not in sys.path:
         sys.path.insert(0, folder)
 
-# Import custom services directly (Flat Style)
+# Import custom modules directly (Flat Style)
 import ui_helper
 import ai_interface
+import config_manager
 import payload_compiler
 import payload_manager
 import report_generator
@@ -38,9 +38,10 @@ import coordinate_utility
 import level_manager
 import grid_manager
 
-# Force reload of flat modules to bypass pyRevit cache
+# Force reload modules to prevent assembly caching issues
 importlib.reload(ui_helper)
 importlib.reload(ai_interface)
+importlib.reload(config_manager)
 importlib.reload(payload_compiler)
 importlib.reload(payload_manager)
 importlib.reload(report_generator)
@@ -50,6 +51,7 @@ importlib.reload(grid_manager)
 
 from ui_helper import BIMInputDialog, BIMMessageService
 from ai_interface import GeminiClient
+from config_manager import ConfigManager
 from payload_compiler import PayloadCompiler
 from payload_manager import PayloadManager
 from report_generator import DryRunReportService
@@ -61,32 +63,58 @@ doc = __revit__.ActiveUIDocument.Document
 
 def main():
     print("🚀 Initializing BIM AI Agent...")
+    
+    # 1. Load active project configuration
+    cfg = ConfigManager(project_root)
+    saved_cfg = cfg.load_config()
+
     default_text = (
-        "We have a new project named 'District 9 Lab'.\n"
-        "We need 1 basement level 4 meters below ground (-4000).\n"
-        "The Ground Floor (Level 0) is at 0.\n"
-        "Then we need 4 office levels, each exactly 3.8 meters above the previous.\n"
-        "Finally, we want a Roof level 4.2 meters above the top floor.\n"
-        "All elevations and grids are in mm.\n"
-        "Grids along X: three bays of 6000mm, labeled 1, 2, 3, 4.\n"
-        "Grids along Y: four bays of 7500mm, labeled A, B, C, D, E.\n"
-        "Our coordination point is the project_base_point."
+        "مذكرة تصميمية مبدئية: \"مركز غزة الطبي\".\n"
+        "الأرضي عند الصفر بالطبع.\n"
+        "الطابق الأول على منسوب 4200 مم.\n"
+        "الطابق الثاني على منسوب 8400 مم.\n"
+        "القبو الأول (B1) يجب أن يكون تحت الأرض بـ 3600 مم.\n"
+        "السطح (Roof) عند 12600 مم.\n"
+        "المحاور:\n"
+        "محاور X: نريد 4 مجازات (bays) بمسافة 6 أمتار لكل منها (من 1 إلى 5).\n"
+        "محاور Y: لم تكتمل دراسة الموقع بعد! لكن مبدئياً ضعوا 3 مجازات نموذجية بمسافة 7.2 متر لكل منها وسنعدلها لاحقاً بعد موافقة المعماري الأساسي.\n"
+        "سنربط الإحداثيات بنقطة المساحة المشتركة للموقع (survey_point). الوحدات ملم."
     )
 
-    form = BIMInputDialog(default_text)
+    # 2. Show Unified Dashboard UI passing credentials and the dynamic model-fetch callback
+    form = BIMInputDialog(
+        default_text=default_text,
+        saved_key=saved_cfg["api_key"],
+        saved_model=saved_cfg["selected_model"],
+        fetch_models_func=GeminiClient.fetch_available_models
+    )
+    
     if form.ShowDialog() != DialogResult.OK:
         print("⚠️ Execution canceled.")
         return
 
-    user_brief = form.textbox.Text.strip()
+    # 3. Retrieve form choices securely using Python native typing
+    user_api_key = form.txt_api.Text.strip()
+    user_brief = form.txt_brief.Text.strip()
+    user_model = "gemini-2.5-flash"  # Standard default fallback
+    
+    if form.cmb_models.SelectedItem:
+        user_model = str(form.cmb_models.SelectedItem)
+
+    if not user_api_key:
+        BIMMessageService.show_error("Gemini API Key is required to run the AI Agent.")
+        return
+        
     if not user_brief:
         BIMMessageService.show_error("The design brief input was empty.")
         return
 
-    print("\n🤖 Sending request to Gemini...")
+    # 4. Save any updated credentials/selections back to your git-ignored config file
+    cfg.save_config(user_api_key, user_model)
+
+    print("\n🤖 Sending request to Gemini (Model: {})...".format(user_model))
     try:
-        api_key = os.environ.get("GEMINI_API_KEY", "AIzaSyCxZW8zex0P3TnvApNnLLwG5_pR4yMcusI")
-        client = GeminiClient(api_key=api_key)
+        client = GeminiClient(api_key=user_api_key, model_name=user_model)
         intent_data = client.query_intent(user_brief)
     except Exception as api_err:
         BIMMessageService.show_error("AI Engine error:\n\n{}".format(api_err))
