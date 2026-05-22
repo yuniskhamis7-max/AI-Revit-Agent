@@ -1,6 +1,6 @@
+# payload_manager.py
 import json
 from dtos import Point2D, LevelData, GridData, ProjectData, ProjectSettings, GridStrategy, LevelStrategy
-from typing import List
 
 class PayloadManager:
     UNIT_MULTIPLIERS = {
@@ -27,20 +27,19 @@ class PayloadManager:
             settings = ProjectSettings(
                 grids_unit=s_data.get("grids_unit", "m"),
                 levels_unit=s_data.get("levels_unit", "m"),
-                use_project_base_point=s_data.get("use_project_base_point", True)
+                coordinate_system=s_data.get("coordinate_system", "project_base_point")
             )
 
-            # Strategies
-            l_strat_data = data.get("level_strategy", {})
-            level_strategy = LevelStrategy(**l_strat_data)
-
-            g_strat_data = data.get("grid_strategy", {})
-            grid_strategy = GridStrategy(**g_strat_data)
+            level_strategy = LevelStrategy(**data.get("level_strategy", {}))
+            grid_strategy = GridStrategy(**data.get("grid_strategy", {}))
 
             levels = []
             for lvl in data.get("levels", []):
                 elev = self._convert(lvl["elevation"], settings.levels_unit)
+                # Fallback to name if ID is missing
+                lvl_id = lvl.get("id", "lvl_" + lvl["name"].lower().replace(" ", "_"))
                 levels.append(LevelData(
+                    id=lvl_id,
                     name=lvl["name"], 
                     elevation=elev, 
                     is_pinned=lvl.get("is_pinned", True),
@@ -54,7 +53,9 @@ class PayloadManager:
                 ex = self._convert(grd["end"]["x"], settings.grids_unit)
                 ey = self._convert(grd["end"]["y"], settings.grids_unit)
                 
+                grd_id = grd.get("id", "grid_" + grd["name"].lower().replace(" ", "_"))
                 grids.append(GridData(
+                    id=grd_id,
                     name=grd["name"], 
                     start=Point2D(sx, sy), 
                     end=Point2D(ex, ey),

@@ -1,3 +1,4 @@
+# dtos.py
 import math
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -12,6 +13,7 @@ class Point2D:
 
 @dataclass
 class LevelData:
+    id: str  # Stable ID for database syncing
     name: str
     elevation: float
     is_pinned: bool = True
@@ -19,6 +21,7 @@ class LevelData:
 
 @dataclass
 class GridData:
+    id: str  # Stable ID for database syncing
     name: str
     start: Point2D
     end: Point2D
@@ -40,7 +43,8 @@ class GridStrategy:
 class ProjectSettings:
     grids_unit: str = "m"   
     levels_unit: str = "m"  
-    use_project_base_point: bool = True
+    # "project_base_point", "survey_point", or "internal_origin"
+    coordinate_system: str = "project_base_point"
 
 @dataclass
 class ProjectData:
