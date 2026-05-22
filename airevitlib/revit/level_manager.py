@@ -1,4 +1,4 @@
-# revit_managers/level_manager.py
+# airevitlib/revit/level_manager.py
 import Autodesk.Revit.DB as DB
 from typing import Optional
 from dtos import LevelData
@@ -14,7 +14,6 @@ class LevelManager:
         self._view_family_types = self._get_view_family_types()
 
     def _build_level_cache(self):
-        """Caches elements using our persistent tracking ID instead of Name (Strategy 4)."""
         cache = {}
         levels = DB.FilteredElementCollector(self.doc).OfClass(DB.Level).ToElements()
         for lvl in levels:
@@ -22,7 +21,6 @@ class LevelManager:
             if tracking_id:
                 cache[tracking_id] = lvl
             else:
-                # Fallback to Name if it hasn't been tagged by our tool yet
                 cache[lvl.Name] = lvl
         return cache
 
@@ -42,11 +40,10 @@ class LevelManager:
         return {vft.ViewFamily: vft for vft in vft_col}
 
     def process_from_payload(self, level_data: LevelData) -> DB.Level:
-        # Resolve target coordinate Z value via our math-based utility
-        transformed_point = self.coord_utility.transform_point(0.0, 0.0, level_data.elevation)
+        # Pass is_level=True to prevent shifting levels based on PBP/Survey Point Z offsets
+        transformed_point = self.coord_utility.transform_point(0.0, 0.0, level_data.elevation, is_level=True)
         target_elev = transformed_point.Z
 
-        # Attempt tracking match via unique Stable ID first, then fallback to Name
         existing_level = self._level_cache.get(level_data.id) or self._level_cache.get(level_data.name)
 
         if existing_level:
@@ -59,11 +56,8 @@ class LevelManager:
             level = DB.Level.Create(self.doc, target_elev)
             level.Name = level_data.name
         
-        # Write tracking ID to comments parameter
         self._set_tracking_id(level, level_data.id)
         self.pin(level, level_data.is_pinned)
-        
-        # Update cache mapping
         self._level_cache[level_data.id] = level
 
         if level_data.create_floor_plan:

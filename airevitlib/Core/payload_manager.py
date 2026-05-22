@@ -1,4 +1,4 @@
-# payload_manager.py
+# airevitlib/core/payload_manager.py
 import json
 from dtos import Point2D, LevelData, GridData, ProjectData, ProjectSettings, GridStrategy, LevelStrategy
 
@@ -36,7 +36,6 @@ class PayloadManager:
             levels = []
             for lvl in data.get("levels", []):
                 elev = self._convert(lvl["elevation"], settings.levels_unit)
-                # Fallback to name if ID is missing
                 lvl_id = lvl.get("id", "lvl_" + lvl["name"].lower().replace(" ", "_"))
                 levels.append(LevelData(
                     id=lvl_id,

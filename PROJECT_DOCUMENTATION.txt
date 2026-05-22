@@ -1,0 +1,770 @@
+AI Revit Agent Project Documentation
+Generated: 2026-05-22
+
+Overview
+AI Revit Agent is a pyRevit extension for generating early Revit structural setup elements from structured project payloads. The active workflow parses JSON into typed Python DTOs, then uses Revit manager classes to create or update levels and grids inside Revit transactions.
+
+Architecture
+The extension/ directory contains the pyRevit ribbon tab, panels, and button entrypoint scripts. The lib/ package contains shared payload DTOs, parsing utilities, coordinate helpers, and Revit API manager classes. The docs/ directory records setup, architecture, and payload schema notes, while payload.json provides sample input data.
+
+Folder Hierarchy
+Repository source tree excluding .git, .venv, and this generated documentation file.
+
+./
+|-- .vscode/
+|   +-- settings.json
+|-- docs/
+|   |-- ARCHITECTURE.md
+|   |-- PAYLOAD_SCHEMA.md
+|   +-- PYREVIT_SETUP.md
+|-- extension/
+|   +-- AIRevit.extension/
+|       +-- AI Revit.tab/
+|           |-- Columns.panel/
+|           |   |-- Create Columns.pushbutton/
+|           |   |   |-- icon.png
+|           |   |   +-- script.py
+|           |   +-- layout
+|           |-- Generation.panel/
+|           |   |-- BuildFromAI.pushbutton/
+|           |   |   |-- icon.png
+|           |   |   +-- script.py
+|           |   +-- layout
+|           |-- Grids.panel/
+|           |   |-- Create Grids.pushbutton/
+|           |   |   |-- icon.png
+|           |   |   +-- script.py
+|           |   +-- layout
+|           |-- Levels.panel/
+|           |   |-- Create Levels.pushbutton/
+|           |   |   |-- icon.png
+|           |   |   +-- script.py
+|           |   +-- layout
+|           +-- layout
+|-- lib/
+|   |-- revit_managers/
+|   |   |-- __init__.py
+|   |   |-- grid_manager.py
+|   |   |-- level_manager.py
+|   |   +-- link_manager.py
+|   |-- __init__.py
+|   |-- coordinate_utility.py
+|   |-- dtos.py
+|   +-- payload_manager.py
+|-- .gitattributes
+|-- .gitignore
+|-- CONTRIBUTING.md
+|-- payload.json
++-- README.md
+
+Code File Contents
+Every Python source file is included below verbatim. Each section begins with the file path relative to the repository root.
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/Columns.panel/Create Columns.pushbutton/script.py
+================================================================================
+
+"""pyRevit entrypoint for future column payload execution.
+
+This placeholder only prepares imports from the repository root. The intended
+next step is to load validated column entries from ``payload.json`` and place
+matching Revit family instances between existing levels.
+"""
+
+import os
+import sys
+
+
+BUTTON_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(BUTTON_DIR, "..", "..", "..", "..", ".."))
+
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+
+
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/Generation.panel/BuildFromAI.pushbutton/script.py
+================================================================================
+
+#! python3
+# -*- coding: utf-8 -*-
+__title__ = 'Build\nFrom AI'
+__author__ = 'BIM Manager'
+
+import Autodesk.Revit.DB as DB
+import Autodesk.Revit.UI as UI
+import os
+import sys
+import importlib
+
+current_dir = os.path.dirname(__file__)
+lib_path = os.path.abspath(os.path.join(current_dir, "../../../../../lib"))
+if lib_path not in sys.path:
+    sys.path.insert(0, lib_path)
+
+import dtos
+import payload_manager
+import coordinate_utility
+import revit_managers.level_manager
+import revit_managers.grid_manager
+
+importlib.reload(dtos)
+importlib.reload(payload_manager)
+importlib.reload(coordinate_utility)
+importlib.reload(revit_managers.level_manager)
+importlib.reload(revit_managers.grid_manager)
+
+from payload_manager import PayloadManager
+from coordinate_utility import CoordinateUtility
+from revit_managers.level_manager import LevelManager
+from revit_managers.grid_manager import GridManager
+
+doc = __revit__.ActiveUIDocument.Document
+
+# High-fidelity simulated Multi-Use Tower structural data payload
+AI_JSON_PAYLOAD = """
+{
+    "settings": {
+        "grids_unit": "mm",
+        "levels_unit": "mm",
+        "coordinate_system": "project_base_point"
+    },
+    "level_strategy": {
+        "mode": "explicit",
+        "link_name": null,
+        "prefix_copied_levels": ""
+    },
+    "grid_strategy": {
+        "mode": "explicit",
+        "link_name": null,
+        "prefix_copied_grids": ""
+    },
+    "levels": [
+        {"id": "lvl_b2", "name": "B2 - Foundation Slab", "elevation": -7200.0, "is_pinned": true, "create_floor_plan": false},
+        {"id": "lvl_b1", "name": "B1 - Parking Garage", "elevation": -3600.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l0", "name": "L0 - Entrance Lobby (PBP)", "elevation": 0.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l1", "name": "L1 - Retail Mezzanine", "elevation": 4800.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l2", "name": "L2 - Office Typical 01", "elevation": 9000.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l3", "name": "L3 - Office Typical 02", "elevation": 12800.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l4", "name": "L4 - Office Typical 03", "elevation": 16600.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l5", "name": "L5 - Mechanical & Plant", "elevation": 20400.0, "is_pinned": true, "create_floor_plan": false},
+        {"id": "lvl_l6", "name": "L6 - Residential Amenity", "elevation": 24600.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l7", "name": "L7 - Residential Typical 01", "elevation": 27800.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l8", "name": "L8 - Residential Typical 02", "elevation": 31000.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l9", "name": "L9 - Residential Typical 03", "elevation": 34200.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_l10", "name": "L10 - Penthouse Suite", "elevation": 37400.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_roof", "name": "Roof Deck / Terrace", "elevation": 41200.0, "is_pinned": true, "create_floor_plan": true},
+        {"id": "lvl_para", "name": "Top of Parapet", "elevation": 42700.0, "is_pinned": false, "create_floor_plan": false}
+    ],
+    "grids": [
+        {"id": "g_1", "name": "1", "start": {"x": 0.0, "y": -4000.0}, "end": {"x": 0.0, "y": 44000.0}, "is_pinned": true},
+        {"id": "g_2", "name": "2", "start": {"x": 6000.0, "y": -4000.0}, "end": {"x": 6000.0, "y": 44000.0}, "is_pinned": true},
+        {"id": "g_3", "name": "3", "start": {"x": 14000.0, "y": -4000.0}, "end": {"x": 14000.0, "y": 44000.0}, "is_pinned": true},
+        {"id": "g_4", "name": "4", "start": {"x": 22000.0, "y": -4000.0}, "end": {"x": 22000.0, "y": 44000.0}, "is_pinned": true},
+        {"id": "g_5", "name": "5", "start": {"x": 28000.0, "y": -4000.0}, "end": {"x": 28000.0, "y": 44000.0}, "is_pinned": true},
+        {"id": "g_6", "name": "6", "start": {"x": 37000.0, "y": -4000.0}, "end": {"x": 37000.0, "y": 44000.0}, "is_pinned": true},
+        
+        {"id": "g_a", "name": "A", "start": {"x": -4000.0, "y": 0.0}, "end": {"x": 41000.0, "y": 0.0}, "is_pinned": true},
+        {"id": "g_b", "name": "B", "start": {"x": -4000.0, "y": 7500.0}, "end": {"x": 41000.0, "y": 7500.0}, "is_pinned": true},
+        {"id": "g_c", "name": "C", "start": {"x": -4000.0, "y": 15000.0}, "end": {"x": 41000.0, "y": 15000.0}, "is_pinned": true},
+        {"id": "g_d", "name": "D", "start": {"x": -4000.0, "y": 21000.0}, "end": {"x": 41000.0, "y": 21000.0}, "is_pinned": true},
+        {"id": "g_e", "name": "E", "start": {"x": -4000.0, "y": 29500.0}, "end": {"x": 41000.0, "y": 29500.0}, "is_pinned": true},
+        {"id": "g_f", "name": "F", "start": {"x": -4000.0, "y": 38000.0}, "end": {"x": 41000.0, "y": 38000.0}, "is_pinned": true}
+    ]
+}
+"""
+
+def generate_dry_run_report(p_data, level_mgr, grid_mgr) -> str:
+    """Pre-flight dry-run check displaying original payload coordinates."""
+    levels_to_create = []
+    levels_to_update = []
+    grids_to_create = []
+    grids_to_update = []
+
+    l_unit = p_data.settings.levels_unit
+    g_unit = p_data.settings.grids_unit
+    
+    l_mult = PayloadManager.UNIT_MULTIPLIERS.get(l_unit.lower(), 1.0)
+
+    # Process Levels
+    for l_data in p_data.levels:
+        display_elevation = round(l_data.elevation / l_mult, 1)
+        existing = level_mgr._level_cache.get(l_data.id) or level_mgr._level_cache.get(l_data.name)
+        if existing:
+            existing_val = round(existing.Elevation / l_mult, 1)
+            levels_to_update.append(f"• {l_data.name} [ID: {l_data.id}] ({existing_val} -> {display_elevation} {l_unit})")
+        else:
+            levels_to_create.append(f"• {l_data.name} [ID: {l_data.id}] ({display_elevation} {l_unit})")
+
+    # Process Grids
+    for g_data in p_data.grids:
+        existing = grid_mgr._grid_cache.get(g_data.id) or grid_mgr._grid_cache.get(g_data.name)
+        if existing:
+            grids_to_update.append(f"• Grid {g_data.name} [ID: {g_data.id}]")
+        else:
+            grids_to_create.append(f"• Grid {g_data.name} [ID: {g_data.id}]")
+
+    report = "AI AGENT TRANSACTION PREVIEW\n"
+    report += "==================================\n\n"
+    report += f"Coordinate Origin: {p_data.settings.coordinate_system.upper()}\n"
+    report += f"Unit Profiles:     Levels: {l_unit.upper()} | Grids: {g_unit.upper()}\n\n"
+    
+    report += f"LEVEL CHANGES ({len(levels_to_create)} New, {len(levels_to_update)} Update):\n"
+    for item in levels_to_create: report += f"  [+] Create {item}\n"
+    for item in levels_to_update: report += f"  [*] Update {item}\n"
+    
+    report += f"\nGRID CHANGES ({len(grids_to_create)} New, {len(grids_to_update)} Update):\n"
+    for item in grids_to_create: report += f"  [+] Create {item}\n"
+    for item in grids_to_update: report += f"  [*] Update {item}\n"
+    
+    return report
+
+def show_preview_dialog(report_text: str) -> bool:
+    """Prompt confirm dialog box using corrected UI namespace."""
+    dialog = UI.TaskDialog("AI Revit Agent Preview")
+    dialog.MainInstruction = "Do you want to apply these model changes?"
+    dialog.MainContent = report_text
+    dialog.CommonButtons = UI.TaskDialogCommonButtons.Yes | UI.TaskDialogCommonButtons.No
+    dialog.DefaultButton = UI.TaskDialogResult.Yes
+    
+    result = dialog.Show()
+    return result == UI.TaskDialogResult.Yes
+
+def main():
+    print("🚀 Initializing BIM AI Agent...")
+    try:
+        payload = PayloadManager(AI_JSON_PAYLOAD)
+        p_data = payload.project_data
+    except Exception as e:
+        print(f"❌ Invalid AI Data: {e}")
+        return
+
+    # Initialize Coordinate Utility
+    coord_util = CoordinateUtility(doc, p_data.settings.coordinate_system)
+    
+    level_mgr = LevelManager(doc, coord_util)
+    grid_mgr = GridManager(doc, coord_util)
+
+    # 1. Run Analysis and Generate Dry-Run Preview report
+    report = generate_dry_run_report(p_data, level_mgr, grid_mgr)
+    
+    # 2. Present Confirmation Dialog
+    if not show_preview_dialog(report):
+        print("⚠️ Transaction aborted by user.")
+        return
+
+    # 3. Open Transaction to Write Changes
+    t = DB.Transaction(doc, "AI Agent: Generate Structure")
+    t.Start()
+    
+    try:
+        print("\n🏗️ Processing Levels...")
+        for lvl_data in p_data.levels:
+            level_mgr.process_from_payload(lvl_data)
+
+        print("\n📐 Processing Grids...")
+        for grid_data in p_data.grids:
+            grid_mgr.process_from_payload(grid_data)
+
+        # --- THE EXTENTS COORDINATION SEQUENCE ---
+        # Regenerate to calculate the base structural coordinates
+        doc.Regenerate() 
+        
+        all_levels = DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements()
+        all_grids = DB.FilteredElementCollector(doc).OfClass(DB.Grid).ToElements()
+        
+        # Step 1: Maximize Grids vertically first.
+        # This forces the grid planes to cross every level from bottom to top.
+        print("\n📏 Aligning Grid Vertical Extents...")
+        for grid in all_grids:
+            grid.Maximize3DExtents()
+
+        # Regenerate again so Revit registers the new, tall 3D grid column bounds
+        doc.Regenerate() 
+
+        # Step 2: Maximize Levels. 
+        # Since the grids now span all levels, Revit will snap the level lines
+        # perfectly to the horizontal limits of the grids!
+        print("📏 Aligning Level Horizontal Extents...")
+        for lvl in all_levels:
+            lvl.Maximize3DExtents()
+
+        t.Commit()
+        print("\n🎉 Model Generation Complete!")
+        
+    except Exception as e:
+        t.RollBack()
+        print(f"\n💥 FATAL REVIT ERROR: Transaction Rolled Back.\n{e}")
+
+if __name__ == "__main__":
+    main()
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/Grids.panel/Create Grids.pushbutton/script.py
+================================================================================
+
+
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/Levels.panel/Create Levels.pushbutton/script.py
+================================================================================
+
+
+
+================================================================================
+lib/__init__.py
+================================================================================
+
+
+
+================================================================================
+lib/coordinate_utility.py
+================================================================================
+
+# coordinate_utility.py
+import math
+import Autodesk.Revit.DB as DB
+
+class CoordinateUtility:
+    """Calculates pure Python 2D/3D coordinate transformations."""
+    
+    def __init__(self, doc: DB.Document, system_type: str):
+        self.doc = doc
+        self.system_type = system_type.lower()
+        self.translation, self.rotation_angle = self._get_coordinate_system_data()
+
+    def _get_coordinate_system_data(self):
+        """Extracts translation translation point and conditional rotation angle."""
+        translation = DB.XYZ.Zero
+        rotation = 0.0  # Default to zero rotation (Project North)
+
+        if self.system_type == "internal_origin":
+            return translation, rotation
+
+        # Fetch Project Base Point or Survey Point
+        category = DB.BuiltInCategory.OST_ProjectBasePoint
+        if self.system_type == "survey_point":
+            category = DB.BuiltInCategory.OST_SharedBasePoint
+
+        base_point = DB.FilteredElementCollector(self.doc) \
+            .OfCategory(category) \
+            .WhereElementIsNotElementType() \
+            .FirstElement()
+
+        if base_point:
+            bbox = base_point.get_BoundingBox(None)
+            if bbox:
+                translation = (bbox.Min + bbox.Max) * 0.5
+            
+            # ONLY apply True North rotation if aligning to the geographical Survey Point.
+            # Project Base Point grids align to Project North (0.0 rotation).
+            if self.system_type == "survey_point":
+                project_location = self.doc.ActiveProjectLocation
+                if project_location:
+                    project_pos = project_location.GetProjectPosition(DB.XYZ.Zero)
+                    if project_pos:
+                        rotation = project_pos.Angle
+
+        return translation, rotation
+
+    def transform_point(self, x: float, y: float, z: float = 0.0) -> DB.XYZ:
+        """Applies manual 2D rotation and 3D translation offset."""
+        cos_a = math.cos(self.rotation_angle)
+        sin_a = math.sin(self.rotation_angle)
+        
+        # 1. Rotate coordinates
+        rotated_x = x * cos_a - y * sin_a
+        rotated_y = x * sin_a + y * cos_a
+
+        # 2. Translate coordinates relative to origin base point
+        final_x = rotated_x + self.translation.X
+        final_y = rotated_y + self.translation.Y
+        final_z = z + self.translation.Z
+
+        return DB.XYZ(final_x, final_y, final_z)
+
+================================================================================
+lib/dtos.py
+================================================================================
+
+# dtos.py
+import math
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+@dataclass
+class Point2D:
+    x: float
+    y: float
+    
+    def distance_to(self, other: 'Point2D') -> float:
+        return math.sqrt((self.x - other.x)**2 + (self.y - other.y)**2)
+
+@dataclass
+class LevelData:
+    id: str  # Stable ID for database syncing
+    name: str
+    elevation: float
+    is_pinned: bool = True
+    create_floor_plan: bool = True
+
+@dataclass
+class GridData:
+    id: str  # Stable ID for database syncing
+    name: str
+    start: Point2D
+    end: Point2D
+    is_pinned: bool = True
+
+@dataclass
+class LevelStrategy:
+    mode: str = "explicit"  # "explicit" or "link"
+    link_name: Optional[str] = None
+    prefix_copied_levels: str = ""
+
+@dataclass
+class GridStrategy:
+    mode: str = "explicit"  # "explicit" or "link"
+    link_name: Optional[str] = None
+    prefix_copied_grids: str = ""
+
+@dataclass
+class ProjectSettings:
+    grids_unit: str = "m"   
+    levels_unit: str = "m"  
+    # "project_base_point", "survey_point", or "internal_origin"
+    coordinate_system: str = "project_base_point"
+
+@dataclass
+class ProjectData:
+    settings: ProjectSettings = field(default_factory=ProjectSettings)
+    level_strategy: LevelStrategy = field(default_factory=LevelStrategy)
+    grid_strategy: GridStrategy = field(default_factory=GridStrategy)
+    levels: List[LevelData] = field(default_factory=list)
+    grids: List[GridData] = field(default_factory=list)
+
+================================================================================
+lib/payload_manager.py
+================================================================================
+
+# payload_manager.py
+import json
+from dtos import Point2D, LevelData, GridData, ProjectData, ProjectSettings, GridStrategy, LevelStrategy
+
+class PayloadManager:
+    UNIT_MULTIPLIERS = {
+        "m": 3.280839895,
+        "mm": 0.0032808399,
+        "cm": 0.032808399,
+        "ft": 1.0,
+        "in": 0.0833333333
+    }
+
+    def __init__(self, raw_json_string: str):
+        self.raw_json = raw_json_string
+        self.project_data = self._parse_payload(raw_json_string)
+
+    def _convert(self, val: float, unit: str) -> float:
+        multiplier = self.UNIT_MULTIPLIERS.get(unit.lower(), 1.0)
+        return val * multiplier
+
+    def _parse_payload(self, json_str: str) -> ProjectData:
+        try:
+            data = json.loads(json_str)
+            
+            s_data = data.get("settings", {})
+            settings = ProjectSettings(
+                grids_unit=s_data.get("grids_unit", "m"),
+                levels_unit=s_data.get("levels_unit", "m"),
+                coordinate_system=s_data.get("coordinate_system", "project_base_point")
+            )
+
+            level_strategy = LevelStrategy(**data.get("level_strategy", {}))
+            grid_strategy = GridStrategy(**data.get("grid_strategy", {}))
+
+            levels = []
+            for lvl in data.get("levels", []):
+                elev = self._convert(lvl["elevation"], settings.levels_unit)
+                # Fallback to name if ID is missing
+                lvl_id = lvl.get("id", "lvl_" + lvl["name"].lower().replace(" ", "_"))
+                levels.append(LevelData(
+                    id=lvl_id,
+                    name=lvl["name"], 
+                    elevation=elev, 
+                    is_pinned=lvl.get("is_pinned", True),
+                    create_floor_plan=lvl.get("create_floor_plan", True)
+                ))
+            
+            grids = []
+            for grd in data.get("grids", []):
+                sx = self._convert(grd["start"]["x"], settings.grids_unit)
+                sy = self._convert(grd["start"]["y"], settings.grids_unit)
+                ex = self._convert(grd["end"]["x"], settings.grids_unit)
+                ey = self._convert(grd["end"]["y"], settings.grids_unit)
+                
+                grd_id = grd.get("id", "grid_" + grd["name"].lower().replace(" ", "_"))
+                grids.append(GridData(
+                    id=grd_id,
+                    name=grd["name"], 
+                    start=Point2D(sx, sy), 
+                    end=Point2D(ex, ey),
+                    is_pinned=grd.get("is_pinned", True)
+                ))
+                
+            return ProjectData(
+                settings=settings, 
+                level_strategy=level_strategy,
+                grid_strategy=grid_strategy, 
+                levels=levels, 
+                grids=grids
+            )
+            
+        except Exception as e:
+            raise ValueError(f"Payload parsing failed: {e}")
+
+================================================================================
+lib/revit_managers/__init__.py
+================================================================================
+
+
+
+================================================================================
+lib/revit_managers/grid_manager.py
+================================================================================
+
+# revit_managers/grid_manager.py
+import Autodesk.Revit.DB as DB
+from typing import Optional
+from dtos import GridData
+from coordinate_utility import CoordinateUtility
+
+class GridManager:
+    TRACKING_PREFIX = "AI_ID:GRD:"
+
+    def __init__(self, doc: DB.Document, coord_utility: CoordinateUtility):
+        self.doc = doc
+        self.coord_utility = coord_utility
+        self._grid_cache = self._build_grid_cache()
+        self.lowest_elevation = self._get_lowest_level_elevation()
+
+    def _get_lowest_level_elevation(self) -> float:
+        """Strategy 1: Identifies the lowest level elevation to project the horizontal grid line."""
+        levels = DB.FilteredElementCollector(self.doc).OfClass(DB.Level).ToElements()
+        if levels:
+            return min([lvl.Elevation for lvl in levels])
+        return 0.0
+
+    def _build_grid_cache(self):
+        """Strategy 4: Indexes cached grid elements using the tracking ID inside standard Comments."""
+        cache = {}
+        grids = DB.FilteredElementCollector(self.doc).OfClass(DB.Grid).ToElements()
+        for grid in grids:
+            tracking_id = self._get_tracking_id(grid)
+            if tracking_id:
+                cache[tracking_id] = grid
+            else:
+                cache[grid.Name] = grid
+        return cache
+
+    def _get_tracking_id(self, grid: DB.Grid) -> Optional[str]:
+        param = grid.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+        if param and param.HasValue and param.AsString().startswith(self.TRACKING_PREFIX):
+            return param.AsString().replace(self.TRACKING_PREFIX, "")
+        return None
+
+    def _set_tracking_id(self, grid: DB.Grid, element_id: str):
+        param = grid.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+        if param:
+            param.Set(f"{self.TRACKING_PREFIX}{element_id}")
+
+    def process_from_payload(self, grid_data: GridData) -> DB.Grid:
+        # Match using tracking identifier, falling back to name
+        existing_grid = self._grid_cache.get(grid_data.id) or self._grid_cache.get(grid_data.name)
+        if existing_grid:
+            if existing_grid.Name != grid_data.name:
+                try: 
+                    existing_grid.Name = grid_data.name
+                except: 
+                    pass
+            self.pin(existing_grid, grid_data.is_pinned)
+            return existing_grid
+
+        # Strategy 1: Place grid curve on the lowest project elevation plane
+        start_xyz = self.coord_utility.transform_point(grid_data.start.x, grid_data.start.y, self.lowest_elevation)
+        end_xyz = self.coord_utility.transform_point(grid_data.end.x, grid_data.end.y, self.lowest_elevation)
+
+        try:
+            line = DB.Line.CreateBound(start_xyz, end_xyz)
+            new_grid = DB.Grid.Create(self.doc, line)
+            
+            try:
+                new_grid.Name = grid_data.name
+            except:
+                pass 
+            
+            self._set_tracking_id(new_grid, grid_data.id)
+            self.pin(new_grid, grid_data.is_pinned)
+            
+            self._grid_cache[grid_data.id] = new_grid
+            return new_grid
+            
+        except Exception as e:
+            print(f"Error creating Grid '{grid_data.name}': {e}")
+            return None
+
+    def pin(self, grid: DB.Grid, state: bool = True):
+        if grid and grid.Pinned != state:
+            grid.Pinned = state
+
+================================================================================
+lib/revit_managers/level_manager.py
+================================================================================
+
+# revit_managers/level_manager.py
+import Autodesk.Revit.DB as DB
+from typing import Optional
+from dtos import LevelData
+from coordinate_utility import CoordinateUtility
+
+class LevelManager:
+    TRACKING_PREFIX = "AI_ID:LVL:"
+
+    def __init__(self, doc: DB.Document, coord_utility: CoordinateUtility):
+        self.doc = doc
+        self.coord_utility = coord_utility
+        self._level_cache = self._build_level_cache()
+        self._view_family_types = self._get_view_family_types()
+
+    def _build_level_cache(self):
+        """Caches elements using our persistent tracking ID instead of Name (Strategy 4)."""
+        cache = {}
+        levels = DB.FilteredElementCollector(self.doc).OfClass(DB.Level).ToElements()
+        for lvl in levels:
+            tracking_id = self._get_tracking_id(lvl)
+            if tracking_id:
+                cache[tracking_id] = lvl
+            else:
+                # Fallback to Name if it hasn't been tagged by our tool yet
+                cache[lvl.Name] = lvl
+        return cache
+
+    def _get_tracking_id(self, level: DB.Level) -> Optional[str]:
+        param = level.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+        if param and param.HasValue and param.AsString().startswith(self.TRACKING_PREFIX):
+            return param.AsString().replace(self.TRACKING_PREFIX, "")
+        return None
+
+    def _set_tracking_id(self, level: DB.Level, element_id: str):
+        param = level.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+        if param:
+            param.Set(f"{self.TRACKING_PREFIX}{element_id}")
+
+    def _get_view_family_types(self):
+        vft_col = DB.FilteredElementCollector(self.doc).OfClass(DB.ViewFamilyType).ToElements()
+        return {vft.ViewFamily: vft for vft in vft_col}
+
+    def process_from_payload(self, level_data: LevelData) -> DB.Level:
+        # Resolve target coordinate Z value via our math-based utility
+        transformed_point = self.coord_utility.transform_point(0.0, 0.0, level_data.elevation)
+        target_elev = transformed_point.Z
+
+        # Attempt tracking match via unique Stable ID first, then fallback to Name
+        existing_level = self._level_cache.get(level_data.id) or self._level_cache.get(level_data.name)
+
+        if existing_level:
+            if abs(existing_level.Elevation - target_elev) > 0.001:
+                existing_level.Elevation = target_elev
+            if existing_level.Name != level_data.name:
+                existing_level.Name = level_data.name
+            level = existing_level
+        else:
+            level = DB.Level.Create(self.doc, target_elev)
+            level.Name = level_data.name
+        
+        # Write tracking ID to comments parameter
+        self._set_tracking_id(level, level_data.id)
+        self.pin(level, level_data.is_pinned)
+        
+        # Update cache mapping
+        self._level_cache[level_data.id] = level
+
+        if level_data.create_floor_plan:
+            self.create_plan_view(level, DB.ViewFamily.FloorPlan)
+
+        return level
+
+    def pin(self, level: DB.Level, state: bool = True):
+        if level.Pinned != state:
+            level.Pinned = state
+
+    def create_plan_view(self, level: DB.Level, view_family: DB.ViewFamily) -> Optional[DB.ViewPlan]:
+        view_type = self._view_family_types.get(view_family)
+        if not view_type: 
+            return None
+
+        existing_views = DB.FilteredElementCollector(self.doc).OfClass(DB.ViewPlan).ToElements()
+        for view in existing_views:
+            if view.GenLevel and view.GenLevel.Id == level.Id and view.GetTypeId() == view_type.Id:
+                return view 
+
+        return DB.ViewPlan.Create(self.doc, view_type.Id, level.Id)
+
+================================================================================
+lib/revit_managers/link_manager.py
+================================================================================
+
+import Autodesk.Revit.DB as DB
+
+class LinkManager:
+    """Dedicated class for handling operations with Revit Links."""
+    
+    def __init__(self, doc: DB.Document):
+        self.doc = doc
+
+    def get_link_instance(self, link_name: str) -> DB.RevitLinkInstance:
+        links = DB.FilteredElementCollector(self.doc).OfClass(DB.RevitLinkInstance).ToElements()
+        return next((L for L in links if link_name.lower() in L.Name.lower()), None)
+
+    def copy_elements(self, link_name: str, db_class, prefix: str = "") -> list:
+        """Generic method to copy any class of elements from a link."""
+        target_link = self.get_link_instance(link_name)
+        if not target_link:
+            print(f"❌ Link '{link_name}' not found.")
+            return []
+
+        link_doc = target_link.GetLinkDocument()
+        linked_elements = DB.FilteredElementCollector(link_doc).OfClass(db_class).WhereElementIsNotElementType().ToElements()
+        
+        element_ids = [e.Id for e in linked_elements]
+        if not element_ids: 
+            return []
+
+        transform = target_link.GetTotalTransform()
+        options = DB.CopyPasteOptions()
+        copied_ids = DB.ElementTransformUtils.CopyElements(
+            link_doc, 
+            DB.List[DB.ElementId](element_ids), 
+            self.doc, 
+            transform, 
+            options
+        )
+        
+        copied_elements = []
+        for c_id in copied_ids:
+            element = self.doc.GetElement(c_id)
+            if prefix and hasattr(element, "Name"):
+                try: 
+                    element.Name = f"{prefix}{element.Name}"
+                except: 
+                    pass
+            copied_elements.append(element)
+            
+        return copied_elements
+
+    def copy_grids(self, link_name: str, prefix: str = "") -> list:
+        return self.copy_elements(link_name, DB.Grid, prefix)
+
+    def copy_levels(self, link_name: str, prefix: str = "") -> list:
+        return self.copy_elements(link_name, DB.Level, prefix)

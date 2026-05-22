@@ -1,4 +1,4 @@
-# revit_managers/grid_manager.py
+# airevitlib/revit/grid_manager.py
 import Autodesk.Revit.DB as DB
 from typing import Optional
 from dtos import GridData
@@ -14,14 +14,12 @@ class GridManager:
         self.lowest_elevation = self._get_lowest_level_elevation()
 
     def _get_lowest_level_elevation(self) -> float:
-        """Strategy 1: Identifies the lowest level elevation to project the horizontal grid line."""
         levels = DB.FilteredElementCollector(self.doc).OfClass(DB.Level).ToElements()
         if levels:
             return min([lvl.Elevation for lvl in levels])
         return 0.0
 
     def _build_grid_cache(self):
-        """Strategy 4: Indexes cached grid elements using the tracking ID inside standard Comments."""
         cache = {}
         grids = DB.FilteredElementCollector(self.doc).OfClass(DB.Grid).ToElements()
         for grid in grids:
@@ -44,7 +42,6 @@ class GridManager:
             param.Set(f"{self.TRACKING_PREFIX}{element_id}")
 
     def process_from_payload(self, grid_data: GridData) -> DB.Grid:
-        # Match using tracking identifier, falling back to name
         existing_grid = self._grid_cache.get(grid_data.id) or self._grid_cache.get(grid_data.name)
         if existing_grid:
             if existing_grid.Name != grid_data.name:
@@ -55,7 +52,6 @@ class GridManager:
             self.pin(existing_grid, grid_data.is_pinned)
             return existing_grid
 
-        # Strategy 1: Place grid curve on the lowest project elevation plane
         start_xyz = self.coord_utility.transform_point(grid_data.start.x, grid_data.start.y, self.lowest_elevation)
         end_xyz = self.coord_utility.transform_point(grid_data.end.x, grid_data.end.y, self.lowest_elevation)
 
@@ -70,7 +66,6 @@ class GridManager:
             
             self._set_tracking_id(new_grid, grid_data.id)
             self.pin(new_grid, grid_data.is_pinned)
-            
             self._grid_cache[grid_data.id] = new_grid
             return new_grid
             
