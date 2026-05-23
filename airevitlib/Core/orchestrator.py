@@ -1,6 +1,7 @@
 # airevitlib/core/orchestrator.py
 import os
 import json
+import random
 import Autodesk.Revit.DB as DB
 import System.Windows.Forms as WinForms
 from ui.forms import BIMConversationalDashboard, BIMMessageService
@@ -47,20 +48,83 @@ class StructuralBIMAgentOrchestrator:
             return
 
         # Phase 5: Run Database Transaction with clean derived geometry calculations
-        compiler = DirectUnitCompiler(validated_data)
+        # We pass self.model_context so the compiler can self-heal and stretch preserved grids
+        compiler = DirectUnitCompiler(validated_data, self.model_context)
         compiled_data = compiler.compile()
 
         t = DB.Transaction(self.doc, "AI Agent: Conversational Structural Setup")
         t.Start()
         try:
-            print("\nExecuting deletions...")
-            delta = validated_data.get("proposed_delta") or {}
-            levels_section = delta.get("levels") or {}
-            grids_section = delta.get("grids") or {}
+            # Phase 1: Full-State Synchronization & Duplicate Sweep
+            print("Synchronizing model state and preparing deletions...")
+            
+            # Map compiled active keys
+            active_level_keys = set()
+            for l in compiled_data.levels:
+                active_level_keys.add(l.id)
+                active_level_keys.add(l.name)
 
-            self.manager.execute_deletions(levels_section.get("delete") or [], "level")
-            self.manager.execute_deletions(grids_section.get("delete") or [], "grid")
+            active_grid_keys = set()
+            for g in compiled_data.grids:
+                active_grid_keys.add(g.id)
+                active_grid_keys.add(g.name)
 
+            # Match exactly one element per active name, flag all duplicates and leftover elements for deletion
+            matched_level_names = set()
+            to_delete_levels = []
+            all_levels = DB.FilteredElementCollector(self.doc) \
+                .OfClass(DB.Level) \
+                .WhereElementIsNotElementType() \
+                .ToElements()
+                
+            for lvl in all_levels:
+                if not lvl.IsValidObject:
+                    continue
+                tracking_id = self.manager._get_tracking_id(lvl, self.manager.LVL_PREFIX)
+                name = lvl.Name
+                
+                if (tracking_id in active_level_keys or name in active_level_keys) and name not in matched_level_names:
+                    matched_level_names.add(name)
+                else:
+                    # Rename immediately to free up name and flag for deletion
+                    try:
+                        lvl.Pinned = False
+                        lvl.Name = "ToDelete_level_{}".format(random.randint(10000, 99999))
+                    except Exception as ex:
+                        print("Warning: Could not rename duplicate level: {}".format(ex))
+                    to_delete_levels.append(lvl)
+
+            matched_grid_names = set()
+            to_delete_grids = []
+            all_grids = DB.FilteredElementCollector(self.doc) \
+                .OfClass(DB.Grid) \
+                .WhereElementIsNotElementType() \
+                .ToElements()
+                
+            for grd in all_grids:
+                if not grd.IsValidObject:
+                    continue
+                tracking_id = self.manager._get_tracking_id(grd, self.manager.GRD_PREFIX)
+                name = grd.Name
+                
+                if (tracking_id in active_grid_keys or name in active_grid_keys) and name not in matched_grid_names:
+                    matched_grid_names.add(name)
+                else:
+                    # Rename immediately to free up name and flag for deletion
+                    try:
+                        grd.Pinned = False
+                        grd.Name = "ToDelete_grid_{}".format(random.randint(10000, 99999))
+                    except Exception as ex:
+                        print("Warning: Could not rename duplicate grid: {}".format(ex))
+                    to_delete_grids.append(grd)
+
+            # Pop the elements flagged for deletion out of active manager caches
+            for lvl in to_delete_levels:
+                self.manager._levels.pop(lvl.Name, None)
+            for grd in to_delete_grids:
+                self.manager._grids.pop(grd.Name, None)
+
+            # Phase 2: Process creations and updates for levels
             print("Processing levels...")
             base_z = 0.0
             for lvl_dto in compiled_data.levels:
@@ -68,9 +132,43 @@ class StructuralBIMAgentOrchestrator:
                 if lvl_dto.elevation < base_z:
                     base_z = lvl_dto.elevation
 
+            # Phase 3: Process creations and updates for grids (including self-healed preserved grids)
             print("Processing grids using footprint boundaries...")
             for grid_dto in compiled_data.grids:
                 self.manager.process_grid(grid_dto, base_z)
+
+            # Phase 4: Execute final deletions of renamed and decoupled items
+            print("\nExecuting deletions...")
+            self.manager.execute_deletions(to_delete_levels)
+            self.manager.execute_deletions(to_delete_grids)
+
+            # Phase 5: Regenerate document to clear old geometry from bounding box checks
+            self.doc.Regenerate()
+
+            # Phase 6: Maximize level and grid extents to neatly match all active boundaries
+            # This vertical and horizontal optimization step ensures both grids and levels intersect cleanly.
+            print("Optimizing visual level and grid extents...")
+            active_levels = DB.FilteredElementCollector(self.doc) \
+                .OfClass(DB.Level) \
+                .WhereElementIsNotElementType() \
+                .ToElements()
+
+            for lvl in active_levels:
+                try:
+                    lvl.Maximize3DExtents()
+                except Exception as ex:
+                    print("Warning: Could not optimize 3D extents for level '{}': {}".format(lvl.Name, ex))
+
+            active_grids = DB.FilteredElementCollector(self.doc) \
+                .OfClass(DB.Grid) \
+                .WhereElementIsNotElementType() \
+                .ToElements()
+
+            for grd in active_grids:
+                try:
+                    grd.Maximize3DExtents()
+                except Exception as ex:
+                    print("Warning: Could not optimize 3D extents for grid '{}': {}".format(grd.Name, ex))
 
             self.doc.Regenerate()
             t.Commit()
@@ -80,31 +178,17 @@ class StructuralBIMAgentOrchestrator:
             BIMMessageService.show_error(f"Transaction aborted:\n\n{err}")
 
     def _process_conversational_query(self, user_prompt: str, api_key: str, model_name: str) -> dict:
-        """Callback to query the AI client, matching changes against the static model state with memory."""
+        """Callback to query the AI client, matching changes against the static, true Revit database state."""
         # 1. Append the user's latest input to the chronological memory
         self.chat_history.append({"role": "user", "text": user_prompt})
 
         client = GeminiClient(api_key=api_key, model_name=model_name)
         
-        # 2. Pass the cumulative conversation history + static Revit state to the AI
+        # 2. Pass cumulative conversation history + static true Revit model state (not proposed states) to the AI
         ai_response = client.query_intent(self.chat_history, self.model_context)
         
         # 3. Append the AI's response to the chronological memory
         clarification = ai_response.get("clarification_message", "")
         self.chat_history.append({"role": "model", "text": clarification})
         
-        # 4. Safely update our in-memory cache of the conversation context
-        delta = ai_response.get("proposed_delta") or {}
-        levels_section = delta.get("levels") or {}
-        grids_section = delta.get("grids") or {}
-
-        lvl_create = levels_section.get("create") or []
-        lvl_update = levels_section.get("update") or []
-        grd_create = grids_section.get("create") or []
-        grd_update = grids_section.get("update") or []
-
-        self.model_context = {
-            "levels": lvl_create + lvl_update,
-            "grids": grd_create + grd_update
-        }
         return ai_response

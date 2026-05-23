@@ -186,7 +186,7 @@ class BIMConversationalDashboard(WinForms.Form):
                 self.cmb_models.SelectedIndex = idx
         except Exception:
             self.cmb_models.Items.Clear()
-            for val in ["gemini-2.5-flash", "gemini-2.5-pro"]:
+            for val in ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-pro"]:
                 self.cmb_models.Items.Add(val)
             self.cmb_models.SelectedIndex = 0
 
@@ -201,7 +201,7 @@ class BIMConversationalDashboard(WinForms.Form):
         self.Update()
 
         api_key = self.txt_api.Text.strip()
-        selected_model = str(self.cmb_models.SelectedItem or "gemini-2.5-flash")
+        selected_model = str(self.cmb_models.SelectedItem or "gemini-flash-lite-latest")
         
         try:
             response_payload = self.on_query_callback(user_input, api_key, selected_model)
@@ -234,21 +234,35 @@ class BIMConversationalDashboard(WinForms.Form):
         self.lst_actions.Items.Clear()
         delta = payload.get("proposed_delta") or {}
 
-        # Parse Level actions safely
+        # Parse Level actions with absolute schema safety
         levels_section = delta.get("levels") or {}
         for l in levels_section.get("create") or []:
-            self.lst_actions.Items.Add(f"[+] LVL: Create {l['name']} @ {l['elevation']}m")
+            if isinstance(l, dict):
+                name = l.get('name', '?')
+                elev = l.get('elevation', 0.0)
+                self.lst_actions.Items.Add(f"[+] LVL: Create {name} @ {elev}m")
         for l in levels_section.get("update") or []:
-            self.lst_actions.Items.Add(f"[*] LVL: Update {l['name']} @ {l['elevation']}m")
+            if isinstance(l, dict):
+                name = l.get('name', '?')
+                elev = l.get('elevation', 0.0)
+                self.lst_actions.Items.Add(f"[*] LVL: Update {name} @ {elev}m")
         for l in levels_section.get("delete") or []:
             self.lst_actions.Items.Add(f"[-] LVL: Delete {l}")
 
-        # Parse Grid actions safely
+        # Parse Grid actions with absolute schema safety (resolves the 'axis' KeyError)
         grids_section = delta.get("grids") or {}
         for g in grids_section.get("create") or []:
-            self.lst_actions.Items.Add(f"[+] GRD: Create Axis {g['axis']}-{g['name']} @ {g['position']}m")
+            if isinstance(g, dict):
+                axis = g.get('axis', '?')
+                name = g.get('name', '?')
+                pos = g.get('position', 0.0)
+                self.lst_actions.Items.Add(f"[+] GRD: Create Axis {axis}-{name} @ {pos}m")
         for g in grids_section.get("update") or []:
-            self.lst_actions.Items.Add(f"[*] GRD: Update Axis {g['axis']}-{g['name']} @ {g['position']}m")
+            if isinstance(g, dict):
+                axis = g.get('axis', '?')
+                name = g.get('name', '?')
+                pos = g.get('position', 0.0)
+                self.lst_actions.Items.Add(f"[*] GRD: Update Axis {axis}-{name} @ {pos}m")
         for g in grids_section.get("delete") or []:
             self.lst_actions.Items.Add(f"[-] GRD: Delete {g}")
 

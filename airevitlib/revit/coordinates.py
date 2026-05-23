@@ -27,11 +27,15 @@ class CoordinateUtility:
             .FirstElement()
 
         if base_point:
-            # Query offsets relative to the internal origin (in decimal feet)
-            ew = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_EASTWEST_PARAM).AsDouble()
-            ns = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM).AsDouble()
-            elev = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_ELEVATION_PARAM).AsDouble()
-            translation = DB.XYZ(ew, ns, elev)
+            # Use the actual Position property of the BasePoint for coordinate stability
+            if hasattr(base_point, "Position"):
+                translation = base_point.Position
+            else:
+                # Fallback to parameter lookup if Position is not exposed
+                ew = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_EASTWEST_PARAM).AsDouble()
+                ns = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM).AsDouble()
+                elev = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_ELEVATION_PARAM).AsDouble()
+                translation = DB.XYZ(ew, ns, elev)
 
         return translation, rotation
 

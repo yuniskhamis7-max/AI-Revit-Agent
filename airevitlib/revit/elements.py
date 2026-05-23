@@ -1,5 +1,6 @@
 # airevitlib/revit/elements.py
 import Autodesk.Revit.DB as DB
+import random
 from typing import Optional, Dict
 from core.models import LevelModel, GridModel
 from revit.coordinates import CoordinateUtility
@@ -24,10 +25,37 @@ class StructuralManager:
                 for lvl in self._levels.values()
             ],
             "grids": [
-                {"id": self._get_tracking_id(grd, self.GRD_PREFIX) or grd.Name, "name": grd.Name}
+                {
+                    "id": self._get_tracking_id(grd, self.GRD_PREFIX) or grd.Name, 
+                    "name": grd.Name,
+                    "axis": self._get_grid_properties(grd)[0],
+                    "position_m": self._get_grid_properties(grd)[1]
+                }
                 for grd in self._grids.values()
             ]
         }
+
+    def _get_grid_properties(self, grid: DB.Grid) -> tuple:
+        """Returns the axis ('X' or 'Y') and position (in meters) of a grid line relative to origin."""
+        try:
+            curve = grid.Curve
+            if curve and isinstance(curve, DB.Line):
+                start = curve.GetEndPoint(0)
+                end = curve.GetEndPoint(1)
+                direction = end - start
+                
+                # Check orientation relative to model space
+                if abs(direction.X) < 0.001:
+                    # Vertical grid line (spaced along X axis, so X coordinate is constant)
+                    rel_x = (start.X - self.coord.translation.X) / 3.280839895
+                    return "X", rel_x
+                else:
+                    # Horizontal grid line (spaced along Y axis, so Y coordinate is constant)
+                    rel_y = (start.Y - self.coord.translation.Y) / 3.280839895
+                    return "Y", rel_y
+        except Exception as ex:
+            print("Warning: Could not extract properties for grid {}: {}".format(grid.Name, ex))
+        return "X", 0.0
 
     def _cache_existing_elements(self, db_class, tracking_prefix: str) -> Dict[str, DB.Element]:
         cache = {}
@@ -59,14 +87,54 @@ class StructuralManager:
         elem = self._levels.get(element_id) or self._levels.get(name)
         return elem.Elevation if elem else None
 
-    def execute_deletions(self, delete_ids: list, element_type: str):
-        """Safely unpins and deletes levels or grids from the model."""
+    def prepare_deletions(self, delete_ids: list, element_type: str) -> list:
+        """Temporarily renames all matching elements flagged for deletion and removes them from active caches."""
         cache = self._levels if element_type == "level" else self._grids
-        for key in delete_ids:
-            elem = cache.get(key)
+        elements_to_delete = []
+        
+        # Gather all elements of this type in the document to safely clean up duplicates
+        db_class = DB.Level if element_type == "level" else DB.Grid
+        prefix = self.LVL_PREFIX if element_type == "level" else self.GRD_PREFIX
+        all_elements = DB.FilteredElementCollector(self.doc) \
+            .OfClass(db_class) \
+            .WhereElementIsNotElementType() \
+            .ToElements()
+
+        for elem in all_elements:
+            if not elem.IsValidObject:
+                continue
+            
+            tracking_id = self._get_tracking_id(elem, prefix)
+            name = elem.Name
+            
+            if (tracking_id in delete_ids) or (name in delete_ids):
+                try:
+                    elem.Pinned = False
+                    rand_suffix = random.randint(10000, 99999)
+                    temp_name = "ToDelete_{}_{}".format(element_type, rand_suffix)
+                    elem.Name = temp_name
+                except Exception as ex:
+                    print("Warning: Could not temporarily rename {} '{}': {}".format(element_type, name, ex))
+                
+                elements_to_delete.append(elem)
+                
+                # Pop out of the cache so we do not match or update them during the creation phase
+                if tracking_id in cache:
+                    cache.pop(tracking_id, None)
+                if name in cache:
+                    cache.pop(name, None)
+                    
+        return elements_to_delete
+
+    def execute_deletions(self, elements_to_delete: list):
+        """Safely unpins and deletes levels or grids from the model."""
+        for elem in elements_to_delete:
             if elem and elem.IsValidObject:
-                elem.Pinned = False
-                self.doc.Delete(elem.Id)
+                try:
+                    elem.Pinned = False
+                    self.doc.Delete(elem.Id)
+                except Exception as ex:
+                    print("Warning: Failed to delete element {}: {}".format(elem.Id, ex))
 
     def process_level(self, data: LevelModel) -> DB.Level:
         p_xyz = self.coord.transform_point(0.0, 0.0, data.elevation, is_level=True)
@@ -91,9 +159,12 @@ class StructuralManager:
     def process_grid(self, data: GridModel, base_elevation: float) -> DB.Grid:
         existing = self._grids.get(data.id) or self._grids.get(data.name)
         if existing:
-            # We recreate grid lines to ensure their lengths always match our compiled extents
-            existing.Pinned = False
-            self.doc.Delete(existing.Id)
+            try:
+                # We recreate grid lines to ensure their lengths always match our compiled extents
+                existing.Pinned = False
+                self.doc.Delete(existing.Id)
+            except Exception as err:
+                print("Warning: Failed to delete existing grid {} before recreating: {}".format(existing.Name, err))
 
         start_xyz = self.coord.transform_point(data.start.x, data.start.y, base_elevation)
         end_xyz = self.coord.transform_point(data.end.x, data.end.y, base_elevation)

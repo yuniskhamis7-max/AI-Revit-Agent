@@ -1,64 +1,1058 @@
 AI Revit Agent Project Documentation
-Generated: 2026-05-22
+Generated: 2026-05-23
 
 Overview
-AI Revit Agent is a pyRevit extension for generating early Revit structural setup elements from structured project payloads. The active workflow parses JSON into typed Python DTOs, then uses Revit manager classes to create or update levels and grids inside Revit transactions.
+AI Revit Agent is a pyRevit extension for turning validated AI or JSON project intent into early Autodesk Revit model setup. It currently focuses on deterministic creation and auditing workflows around levels, grids, columns, and related project data.
 
 Architecture
-The extension/ directory contains the pyRevit ribbon tab, panels, and button entrypoint scripts. The lib/ package contains shared payload DTOs, parsing utilities, coordinate helpers, and Revit API manager classes. The docs/ directory records setup, architecture, and payload schema notes, while payload.json provides sample input data.
+The extension/ directory contains the pyRevit ribbon layout and button entrypoints. The airevitlib/ package contains the reusable Python layers: core models and orchestration, service adapters for AI/compilation/auditing, Revit API helpers, and lightweight UI helpers. The docs/ directory describes setup and schemas, while payload.json provides sample structured input.
 
 Folder Hierarchy
-Repository source tree excluding .git, .venv, and this generated documentation file.
+Repository source tree excluding .git, .venv, Python cache folders, and other generated cache artifacts.
 
 ./
+|-- .gitattributes
+|-- .gitignore
 |-- .vscode/
-|   +-- settings.json
+|   |-- settings.json
+|-- airevit_config.json
+|-- airevitlib/
+|   |-- core/
+|   |   |-- __init__.py
+|   |   |-- config.py
+|   |   |-- models.py
+|   |   +-- orchestrator.py
+|   |-- revit/
+|   |   |-- __init__.py
+|   |   |-- coordinates.py
+|   |   +-- elements.py
+|   |-- services/
+|   |   |-- __init__.py
+|   |   |-- ai.py
+|   |   |-- auditor.py
+|   |   +-- compiler.py
+|   +-- ui/
+|       |-- __init__.py
+|       +-- forms.py
+|-- CONTRIBUTING.md
 |-- docs/
 |   |-- ARCHITECTURE.md
+|   |-- INTENT_SCHEMA.md
 |   |-- PAYLOAD_SCHEMA.md
 |   +-- PYREVIT_SETUP.md
 |-- extension/
-|   +-- AIRevit.extension/
-|       +-- AI Revit.tab/
-|           |-- Columns.panel/
-|           |   |-- Create Columns.pushbutton/
-|           |   |   |-- icon.png
-|           |   |   +-- script.py
-|           |   +-- layout
-|           |-- Generation.panel/
-|           |   |-- BuildFromAI.pushbutton/
-|           |   |   |-- icon.png
-|           |   |   +-- script.py
-|           |   +-- layout
-|           |-- Grids.panel/
-|           |   |-- Create Grids.pushbutton/
-|           |   |   |-- icon.png
-|           |   |   +-- script.py
-|           |   +-- layout
-|           |-- Levels.panel/
-|           |   |-- Create Levels.pushbutton/
-|           |   |   |-- icon.png
-|           |   |   +-- script.py
-|           |   +-- layout
-|           +-- layout
-|-- lib/
-|   |-- revit_managers/
-|   |   |-- __init__.py
-|   |   |-- grid_manager.py
-|   |   |-- level_manager.py
-|   |   +-- link_manager.py
-|   |-- __init__.py
-|   |-- coordinate_utility.py
-|   |-- dtos.py
-|   +-- payload_manager.py
-|-- .gitattributes
-|-- .gitignore
-|-- CONTRIBUTING.md
+|   |-- AIRevit.extension/
+|   |   |-- AI Revit.tab/
+|   |   |   |-- Columns.panel/
+|   |   |   |   |-- Create Columns.pushbutton/
+|   |   |   |   |   |-- icon.png
+|   |   |   |   |   +-- script.py
+|   |   |   |   +-- layout
+|   |   |   |-- Generation.panel/
+|   |   |   |   |-- BuildFromAI.pushbutton/
+|   |   |   |   |   |-- icon.png
+|   |   |   |   |   +-- script.py
+|   |   |   |   +-- layout
+|   |   |   |-- Grids.panel/
+|   |   |   |   |-- Create Grids.pushbutton/
+|   |   |   |   |   |-- icon.png
+|   |   |   |   |   +-- script.py
+|   |   |   |   +-- layout
+|   |   |   |-- layout
+|   |   |   +-- Levels.panel/
+|   |   |       |-- Create Levels.pushbutton/
+|   |   |       |   |-- icon.png
+|   |   |       |   +-- script.py
+|   |   |       +-- layout
 |-- payload.json
-+-- README.md
+|-- PROJECT_DOCUMENTATION.txt
+|-- README.md
 
 Code File Contents
-Every Python source file is included below verbatim. Each section begins with the file path relative to the repository root.
+The Python source files, pyRevit layout files, and tracked JSON source/config files are included below verbatim. Each section begins with the file path relative to the repository root. Ignored local secret configuration such as airevit_config.json is intentionally not reproduced.
+
+================================================================================
+.vscode/settings.json
+================================================================================
+
+{
+    "python.analysis.typeCheckingMode": "basic",
+    "python.formatting.provider": "black"
+}
+
+
+
+================================================================================
+airevitlib/core/__init__.py
+================================================================================
+
+
+
+================================================================================
+airevitlib/core/config.py
+================================================================================
+
+# airevitlib/core/config.py
+import os
+import json
+
+class ConfigManager:
+    """Handles credentials and configuration parameters saved to git-ignored files."""
+
+    def __init__(self, project_root: str):
+        self.config_path = os.path.join(project_root, "airevit_config.json")
+
+    def load_config(self) -> dict:
+        config = {
+            "api_key": os.environ.get("GEMINI_API_KEY", ""),
+            "selected_model": "gemini-2.5-flash"
+        }
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r") as f:
+                    data = json.load(f)
+                    if data.get("api_key"):
+                        config["api_key"] = data["api_key"].strip()
+                    if data.get("selected_model"):
+                        config["selected_model"] = data["selected_model"].strip()
+            except:
+                pass
+        return config
+
+    def save_config(self, api_key: str, selected_model: str):
+        try:
+            data = {
+                "api_key": api_key.strip(),
+                "selected_model": selected_model.strip()
+            }
+            with open(self.config_path, "w") as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"Failed to cache configuration parameters: {e}")
+
+
+================================================================================
+airevitlib/core/models.py
+================================================================================
+
+# airevitlib/core/models.py
+from dataclasses import dataclass, field
+from typing import List
+
+@dataclass
+class Point2D:
+    x: float  # Revit internal decimal feet
+    y: float  # Revit internal decimal feet
+
+@dataclass
+class LevelModel:
+    id: str
+    name: str
+    elevation: float  # Revit internal decimal feet
+    is_pinned: bool = True
+    create_floor_plan: bool = True
+
+@dataclass
+class GridModel:
+    id: str
+    name: str
+    start: Point2D
+    end: Point2D
+    is_pinned: bool = True
+
+@dataclass
+class ProjectSettings:
+    source_units: str = "mm"
+    coordinate_system: str = "project_base_point"
+
+@dataclass
+class CompiledProjectData:
+    settings: ProjectSettings
+    levels: List[LevelModel] = field(default_factory=list)
+    grids: List[GridModel] = field(default_factory=list)
+
+
+================================================================================
+airevitlib/core/orchestrator.py
+================================================================================
+
+# airevitlib/core/orchestrator.py
+import os
+import json
+import Autodesk.Revit.DB as DB
+import System.Windows.Forms as WinForms
+from ui.forms import BIMConversationalDashboard, BIMMessageService
+from core.config import ConfigManager
+from services.ai import GeminiClient
+from services.compiler import DirectUnitCompiler
+from revit.coordinates import CoordinateUtility
+from revit.elements import StructuralManager
+
+class StructuralBIMAgentOrchestrator:
+    """Manages the verification loop and coordinates the database transaction updates."""
+
+    def __init__(self, doc: DB.Document, project_root_path: str):
+        self.doc = doc
+        self.root = project_root_path
+        self.chat_history = []  # Conversational memory buffer starts completely empty
+        self.model_context = None
+
+    def run_pipeline(self):
+        cfg = ConfigManager(self.root)
+        saved_cfg = cfg.load_config()
+
+        # Extract actual Revit database state once. It remains static during the chat loop.
+        coord_util = CoordinateUtility(self.doc, "project_base_point")
+        self.manager = StructuralManager(self.doc, coord_util)
+        self.model_context = self.manager.get_existing_model_context()
+
+        # Initialize the Conversational Verification loop UI (No default template inputs)
+        form = BIMConversationalDashboard(
+            saved_key=saved_cfg["api_key"],
+            saved_model=saved_cfg["selected_model"],
+            fetch_models_func=GeminiClient.fetch_available_models,
+            on_query_callback=self._process_conversational_query
+        )
+
+        # Show conversational dialog panel and monitor response
+        if form.ShowDialog() != WinForms.DialogResult.OK:
+            print("Layout operation cancelled.")
+            return
+        
+        # Retrieve the validated payload
+        validated_data = form.validated_payload
+        if not validated_data:
+            return
+
+        # Phase 5: Run Database Transaction with clean derived geometry calculations
+        compiler = DirectUnitCompiler(validated_data)
+        compiled_data = compiler.compile()
+
+        t = DB.Transaction(self.doc, "AI Agent: Conversational Structural Setup")
+        t.Start()
+        try:
+            print("\nExecuting deletions...")
+            delta = validated_data.get("proposed_delta") or {}
+            levels_section = delta.get("levels") or {}
+            grids_section = delta.get("grids") or {}
+
+            self.manager.execute_deletions(levels_section.get("delete") or [], "level")
+            self.manager.execute_deletions(grids_section.get("delete") or [], "grid")
+
+            print("Processing levels...")
+            base_z = 0.0
+            for lvl_dto in compiled_data.levels:
+                self.manager.process_level(lvl_dto)
+                if lvl_dto.elevation < base_z:
+                    base_z = lvl_dto.elevation
+
+            print("Processing grids using footprint boundaries...")
+            for grid_dto in compiled_data.grids:
+                self.manager.process_grid(grid_dto, base_z)
+
+            self.doc.Regenerate()
+            t.Commit()
+            print("\nBIM Elements synchronized successfully.")
+        except Exception as err:
+            t.RollBack()
+            BIMMessageService.show_error(f"Transaction aborted:\n\n{err}")
+
+    def _process_conversational_query(self, user_prompt: str, api_key: str, model_name: str) -> dict:
+        """Callback to query the AI client, matching changes against the static model state with memory."""
+        # 1. Append the user's latest input to the chronological memory
+        self.chat_history.append({"role": "user", "text": user_prompt})
+
+        client = GeminiClient(api_key=api_key, model_name=model_name)
+        
+        # 2. Pass the cumulative conversation history + static Revit state to the AI
+        ai_response = client.query_intent(self.chat_history, self.model_context)
+        
+        # 3. Append the AI's response to the chronological memory
+        clarification = ai_response.get("clarification_message", "")
+        self.chat_history.append({"role": "model", "text": clarification})
+        
+        # 4. Safely update our in-memory cache of the conversation context
+        delta = ai_response.get("proposed_delta") or {}
+        levels_section = delta.get("levels") or {}
+        grids_section = delta.get("grids") or {}
+
+        lvl_create = levels_section.get("create") or []
+        lvl_update = levels_section.get("update") or []
+        grd_create = grids_section.get("create") or []
+        grd_update = grids_section.get("update") or []
+
+        self.model_context = {
+            "levels": lvl_create + lvl_update,
+            "grids": grd_create + grd_update
+        }
+        return ai_response
+
+
+================================================================================
+airevitlib/revit/__init__.py
+================================================================================
+
+
+
+================================================================================
+airevitlib/revit/coordinates.py
+================================================================================
+
+# airevitlib/revit/coordinates.py
+import Autodesk.Revit.DB as DB
+
+class CoordinateUtility:
+    """Calculates precise translations relative to the Project Base Point or Survey Point."""
+    
+    def __init__(self, doc: DB.Document, system_type: str):
+        self.doc = doc
+        self.system_type = system_type.lower()
+        self.translation, self.rotation_angle = self._get_coordinate_system_data()
+
+    def _get_coordinate_system_data(self):
+        translation = DB.XYZ.Zero
+        rotation = 0.0
+
+        if self.system_type == "internal_origin":
+            return translation, rotation
+
+        # Query the correct base point element category
+        category = DB.BuiltInCategory.OST_ProjectBasePoint
+        if self.system_type == "survey_point":
+            category = DB.BuiltInCategory.OST_SharedBasePoint
+
+        base_point = DB.FilteredElementCollector(self.doc) \
+            .OfCategory(category) \
+            .WhereElementIsNotElementType() \
+            .FirstElement()
+
+        if base_point:
+            # Query offsets relative to the internal origin (in decimal feet)
+            ew = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_EASTWEST_PARAM).AsDouble()
+            ns = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM).AsDouble()
+            elev = base_point.get_Parameter(DB.BuiltInParameter.BASEPOINT_ELEVATION_PARAM).AsDouble()
+            translation = DB.XYZ(ew, ns, elev)
+
+        return translation, rotation
+
+    def transform_point(self, x: float, y: float, z: float = 0.0, is_level: bool = False) -> DB.XYZ:
+        """Translates coordinates consistently so both levels and grids align perfectly at the base point."""
+        if is_level:
+            # Translate level height by the Base Point's vertical offset
+            return DB.XYZ(0.0, 0.0, z + self.translation.Z)
+        
+        # Translate grids horizontally and vertically relative to the Base Point.
+        return DB.XYZ(x + self.translation.X, y + self.translation.Y, z + self.translation.Z)
+
+
+================================================================================
+airevitlib/revit/elements.py
+================================================================================
+
+# airevitlib/revit/elements.py
+import Autodesk.Revit.DB as DB
+from typing import Optional, Dict
+from core.models import LevelModel, GridModel
+from revit.coordinates import CoordinateUtility
+
+class StructuralManager:
+    """Manages transactional database writes, element modifications, and deletions."""
+    
+    LVL_PREFIX = "AI_ID:LVL:"
+    GRD_PREFIX = "AI_ID:GRD:"
+
+    def __init__(self, doc: DB.Document, coord_utility: CoordinateUtility):
+        self.doc = doc
+        self.coord = coord_utility
+        self._levels = self._cache_existing_elements(DB.Level, self.LVL_PREFIX)
+        self._grids = self._cache_existing_elements(DB.Grid, self.GRD_PREFIX)
+
+    def get_existing_model_context(self) -> dict:
+        """Serializes current Revit model elements so the AI can run differential audits."""
+        return {
+            "levels": [
+                {"id": self._get_tracking_id(lvl, self.LVL_PREFIX) or lvl.Name, "name": lvl.Name, "elevation_m": lvl.Elevation / 3.280839895}
+                for lvl in self._levels.values()
+            ],
+            "grids": [
+                {"id": self._get_tracking_id(grd, self.GRD_PREFIX) or grd.Name, "name": grd.Name}
+                for grd in self._grids.values()
+            ]
+        }
+
+    def _cache_existing_elements(self, db_class, tracking_prefix: str) -> Dict[str, DB.Element]:
+        cache = {}
+        elements = DB.FilteredElementCollector(self.doc).OfClass(db_class).WhereElementIsNotElementType().ToElements()
+        for elem in elements:
+            tracking_id = self._get_tracking_id(elem, tracking_prefix)
+            if tracking_id:
+                cache[tracking_id] = elem
+            else:
+                cache[elem.Name] = elem
+        return cache
+
+    def _get_tracking_id(self, elem: DB.Element, prefix: str) -> Optional[str]:
+        param = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+        if param and param.HasValue and param.AsString().startswith(prefix):
+            return param.AsString().replace(prefix, "")
+        return None
+
+    def _set_tracking_id(self, elem: DB.Element, prefix: str, target_id: str):
+        param = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+        if param:
+            param.Set(f"{prefix}{target_id}")
+
+    def element_exists(self, element_id: str, name: str, element_type: str) -> bool:
+        cache = self._levels if element_type == "level" else self._grids
+        return (element_id in cache) or (name in cache)
+
+    def get_existing_elevation(self, element_id: str, name: str) -> Optional[float]:
+        elem = self._levels.get(element_id) or self._levels.get(name)
+        return elem.Elevation if elem else None
+
+    def execute_deletions(self, delete_ids: list, element_type: str):
+        """Safely unpins and deletes levels or grids from the model."""
+        cache = self._levels if element_type == "level" else self._grids
+        for key in delete_ids:
+            elem = cache.get(key)
+            if elem and elem.IsValidObject:
+                elem.Pinned = False
+                self.doc.Delete(elem.Id)
+
+    def process_level(self, data: LevelModel) -> DB.Level:
+        p_xyz = self.coord.transform_point(0.0, 0.0, data.elevation, is_level=True)
+        target_z = p_xyz.Z
+
+        existing = self._levels.get(data.id) or self._levels.get(data.name)
+        if existing:
+            existing.Pinned = False
+            if abs(existing.Elevation - target_z) > 0.001:
+                existing.Elevation = target_z
+            if existing.Name != data.name:
+                existing.Name = data.name
+            level = existing
+        else:
+            level = DB.Level.Create(self.doc, target_z)
+            level.Name = data.name
+
+        self._set_tracking_id(level, self.LVL_PREFIX, data.id)
+        level.Pinned = data.is_pinned
+        return level
+
+    def process_grid(self, data: GridModel, base_elevation: float) -> DB.Grid:
+        existing = self._grids.get(data.id) or self._grids.get(data.name)
+        if existing:
+            # We recreate grid lines to ensure their lengths always match our compiled extents
+            existing.Pinned = False
+            self.doc.Delete(existing.Id)
+
+        start_xyz = self.coord.transform_point(data.start.x, data.start.y, base_elevation)
+        end_xyz = self.coord.transform_point(data.end.x, data.end.y, base_elevation)
+
+        try:
+            line = DB.Line.CreateBound(start_xyz, end_xyz)
+            grid = DB.Grid.Create(self.doc, line)
+            grid.Name = data.name
+            self._set_tracking_id(grid, self.GRD_PREFIX, data.id)
+            grid.Pinned = data.is_pinned
+            return grid
+        except Exception as err:
+            print(f"Failed to create grid {data.name}: {err}")
+            return None
+
+
+================================================================================
+airevitlib/services/__init__.py
+================================================================================
+
+
+
+================================================================================
+airevitlib/services/ai.py
+================================================================================
+
+# airevitlib/services/ai.py
+import json
+import urllib.request
+import urllib.error
+
+class GeminiClient:
+    """Manages stateful multi-turn conversational validation loops."""
+
+    def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+        self.system_instruction = (
+            "You are an expert structural BIM/VDC systems architect. Your job is to process a multi-turn conversation, "
+            "determine the cumulative structural layout requested by the user, and output a validated delta plan "
+            "relative to the Revit model's actual, existing state.\n\n"
+            
+            "INPUT STRUCTURE:\n"
+            "You will receive a JSON payload containing:\n"
+            "1. 'conversation_history': A list of all past user and model messages in chronological order.\n"
+            "2. 'existing_model_state': A dictionary of levels and grids currently sitting in the real Revit model.\n\n"
+            
+            "CRITICAL GRID COUNT RULE (PREVENT FENCEPOST ERRORS):\n"
+            "1. If the user asks for 'N grids' or 'N grid lines', you MUST output exactly N elements in the list (e.g. '3 grids' -> 3 elements).\n"
+            "2. If the user asks for 'N bays', you MUST output exactly N+1 elements in the list (e.g. '3 bays' -> 4 elements).\n"
+            "3. Do not confuse 'grids' with 'bays'. If the user says 'create 3 grids', they want exactly 3 grid lines (e.g. 1, 2, 3), not 4.\n\n"
+
+            "CRITICAL CONVERSATIONAL MEMORY RULE:\n"
+            "1. Read the entire 'conversation_history' from first to last to understand the context and the user's choices.\n"
+            "2. Compare the final consolidated user design intent against the actual 'existing_model_state'.\n"
+            "3. If the user confirms a deletion of an existing element, you MUST add that element's ID/Name to the deletion list.\n\n"
+
+            "CRITICAL DESIGN RULES:\n"
+            "1. LANGUAGE STANDARDIZATION: Keep all internal keys, structural IDs, and names in English "
+            "   (e.g., translate 'Ø§Ù„Ø£Ø±Ø¶ÙŠ' to 'Ground Floor'). Keep conversational messages friendly and in the user's language.\n\n"
+
+            "CONVERSATIONAL VALIDATION LOOP:\n"
+            "If the cumulative details are incomplete or contradictory, set 'is_valid' to false and write a clear, friendly "
+            "clarification message in 'clarification_message'. Only set 'is_valid' to true when the parameters are complete and unambiguous.\n\n"
+
+            "Output MUST be raw JSON matching this schema:\n"
+            "{\n"
+            '  "is_valid": bool,\n'
+            '  "clarification_message": "Friendly, conversational status update or clarification questions",\n'
+            '  "kpis": {\n'
+            '     "total_length_m": float or null,\n'
+            '     "total_width_m": float or null,\n'
+            '     "total_height_m": float or null,\n'
+            '     "footprint_area_sqm": float or null,\n'
+            '     "total_floors": int,\n'
+            '     "total_grids": int\n'
+            '  },\n'
+            '  "proposed_delta": {\n'
+            '     "levels": {\n'
+            '        "create": [ { "id": "lvl_b1", "name": "Basement 1", "elevation": -3.6, "create_floor_plan": true } ],\n'
+            '        "update": [ { "id": "lvl_1", "name": "Level 1", "elevation": 4.2 } ],\n'
+            '        "delete": [ "string_id_or_name" ]\n'
+            '     },\n'
+            '     "grids": {\n'
+            '        "create": [ { "id": "g_x_1", "name": "1", "axis": "X", "position": 0.0 } ],\n'
+            '        "update": [ { "id": "g_y_a", "name": "A", "axis": "Y", "position": 0.0 } ],\n'
+            '        "delete": [ "string_id_or_name" ]\n'
+            '     }\n'
+            '  }\n'
+            "}\n"
+        )
+
+    @staticmethod
+    def fetch_available_models(api_key: str) -> list:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        req = urllib.request.Request(url, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                res_body = response.read().decode("utf-8")
+                res_json = json.loads(res_body)
+                output_models = []
+                for m in res_json.get("models", []):
+                    if "generateContent" in m.get("supportedGenerationMethods", []):
+                        m_id = m["name"].replace("models/", "")
+                        if "vision" not in m_id and "bidi" not in m_id:
+                            output_models.append({"id": m_id, "name": m.get("displayName", m_id)})
+                return sorted(output_models, key=lambda x: x["id"])
+        except Exception as e:
+            raise RuntimeError(f"Could not query Gemini models: {e}")
+
+    def query_intent(self, chat_history: list, existing_context: dict) -> dict:
+        combined_payload = {
+            "conversation_history": chat_history,
+            "existing_model_state": existing_context
+        }
+        
+        request_data = {
+            "contents": [{"parts": [{"text": json.dumps(combined_payload)}]}],
+            "generationConfig": {"responseMimeType": "application/json"},
+            "systemInstruction": {"parts": [{"text": self.system_instruction}]}
+        }
+        
+        json_bytes = json.dumps(request_data).encode("utf-8")
+        req = urllib.request.Request(
+            self.api_url, 
+            data=json_bytes, 
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                res_body = response.read().decode("utf-8")
+                res_json = json.loads(res_body)
+                output_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                return json.loads(output_text)
+        except urllib.error.HTTPError as he:
+            err_content = he.read().decode("utf-8")
+            raise RuntimeError(f"API HTTP Error {he.code}: {err_content}")
+        except Exception as e:
+            raise RuntimeError(f"API Connection error: {e}")
+
+
+================================================================================
+airevitlib/services/auditor.py
+================================================================================
+
+# airevitlib/services/auditor.py
+from core.models import CompiledProjectData
+from revit.elements import StructuralManager
+from services.compiler import DirectUnitCompiler
+
+class ChangeAuditor:
+    """Compares incoming compiled data against existing model elements to generate a report."""
+
+    def __init__(self, data: CompiledProjectData, manager: StructuralManager):
+        self.data = data
+        self.manager = manager
+
+    def compile_preview_report(self) -> str:
+        lvl_new, lvl_upd = [], []
+        grd_new, grd_upd = [], []
+
+        src_unit = self.data.settings.source_units
+        unit_label = src_unit.upper()
+        scale_factor = DirectUnitCompiler.TO_FEET.get(src_unit, 1.0)
+
+        for l in self.data.levels:
+            target_h = round(l.elevation / scale_factor, 1)
+            if self.manager.element_exists(l.id, l.name, "level"):
+                current_ft = self.manager.get_existing_elevation(l.id, l.name)
+                current_h = round(current_ft / scale_factor, 1) if current_ft is not None else 0.0
+                lvl_upd.append(f" â€¢ {l.name} [{l.id}] ({current_h} -> {target_h} {unit_label})")
+            else:
+                lvl_new.append(f" â€¢ {l.name} [{l.id}] ({target_h} {unit_label})")
+
+        for g in self.data.grids:
+            if self.manager.element_exists(g.id, g.name, "grid"):
+                grd_upd.append(f" â€¢ Grid {g.name} [{g.id}]")
+            else:
+                grd_new.append(f" â€¢ Grid {g.name} [{g.id}]")
+
+        report = "AI BIM AGENT TRANSACTION PREVIEW\n"
+        report += "==================================\n\n"
+        report += f"Coordinate Origin: {self.data.settings.coordinate_system.upper()}\n"
+        report += f"Target Units:      {unit_label}\n\n"
+
+        report += f"LEVEL CHANGES ({len(lvl_new)} New, {len(lvl_upd)} Updates):\n"
+        for item in lvl_new: 
+            report += f"  [+] {item}\n"
+        for item in lvl_upd: 
+            report += f"  [*] {item}\n"
+
+        report += f"\nGRID CHANGES ({len(grd_new)} New, {len(grd_upd)} Updates):\n"
+        for item in grd_new: 
+            report += f"  [+] {item}\n"
+        for item in grd_upd: 
+            report += f"  [*] {item}\n"
+
+        return report
+
+
+================================================================================
+airevitlib/services/compiler.py
+================================================================================
+
+# airevitlib/services/compiler.py
+from core.models import CompiledProjectData, ProjectSettings, LevelModel, GridModel, Point2D
+
+class DirectUnitCompiler:
+    """Calculates building extents and scales coordinates to internal decimal feet."""
+    
+    TO_FEET = {
+        "m": 3.280839895,
+        "mm": 0.0032808399,
+        "cm": 0.032808399,
+        "ft": 1.0,
+        "in": 0.0833333333
+    }
+
+    def __init__(self, raw_ai_response: dict):
+        self.ai_data = raw_ai_response
+        self.delta = raw_ai_response.get("proposed_delta", {})
+        self.unit = "m"  # Standardize on meters for internal transfer scale
+        self.scale = self.TO_FEET[self.unit]
+
+    def compile(self) -> CompiledProjectData:
+        settings = ProjectSettings(
+            source_units=self.unit,
+            coordinate_system="project_base_point"
+        )
+        
+        levels = self._compile_levels()
+        grids = self._compile_grids()
+        
+        return CompiledProjectData(
+            settings=settings,
+            levels=levels,
+            grids=grids
+        )
+
+    def _compile_levels(self) -> list:
+        compiled = []
+        creates = self.delta.get("levels", {}).get("create", [])
+        updates = self.delta.get("levels", {}).get("update", [])
+        
+        for l in (creates + updates):
+            compiled.append(LevelModel(
+                id=l["id"],
+                name=l["name"],
+                elevation=float(l["elevation"]) * self.scale,
+                is_pinned=True,
+                create_floor_plan=l.get("create_floor_plan", True)
+            ))
+        return compiled
+
+    def _compile_grids(self) -> list:
+        # Extract all proposed grid coordinates
+        x_grids = []
+        y_grids = []
+        
+        grid_data_list = (
+            self.delta.get("grids", {}).get("create", []) + 
+            self.delta.get("grids", {}).get("update", [])
+        )
+
+        for g in grid_data_list:
+            pos_ft = float(g["position"]) * self.scale
+            if g["axis"].upper() == "X":
+                x_grids.append((g, pos_ft))
+            else:
+                y_grids.append((g, pos_ft))
+
+        # If there are no grids on either axis, return empty immediately
+        if not x_grids and not y_grids:
+            return []
+
+        # Find coordinates of defined grids, fallback to 0.0 if an axis is empty
+        x_coords = [pos for _, pos in x_grids] if x_grids else [0.0]
+        y_coords = [pos for _, pos in y_grids] if y_grids else [0.0]
+        
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+
+        # Determine standard overhang offsets (Fallback to 20m if only one grid line exists)
+        x_span = x_max - x_min if len(x_grids) > 1 else (20.0 * self.scale)
+        y_span = y_max - y_min if len(y_grids) > 1 else (20.0 * self.scale)
+        
+        overhang_x = max(x_span * 0.10, 5.0)
+        overhang_y = max(y_span * 0.10, 5.0)
+
+        # Draw vertical lines (X-Axis) based on Y footprint or default range
+        if not y_grids:
+            min_grid_y = -15.0 * self.scale
+            max_grid_y = 15.0 * self.scale
+        else:
+            min_grid_y = y_min - overhang_y
+            max_grid_y = y_max + overhang_y
+
+        # Draw horizontal lines (Y-Axis) based on X footprint or default range
+        if not x_grids:
+            min_grid_x = -15.0 * self.scale
+            max_grid_x = 15.0 * self.scale
+        else:
+            min_grid_x = x_min - overhang_x
+            max_grid_x = x_max + overhang_x
+
+        compiled_grids = []
+        
+        for g, x_pos in x_grids:
+            compiled_grids.append(GridModel(
+                id=g["id"],
+                name=g["name"],
+                start=Point2D(x_pos, min_grid_y),
+                end=Point2D(x_pos, max_grid_y),
+                is_pinned=True
+            ))
+
+        for g, y_pos in y_grids:
+            compiled_grids.append(GridModel(
+                id=g["id"],
+                name=g["name"],
+                start=Point2D(min_grid_x, y_pos),
+                end=Point2D(max_grid_x, y_pos),
+                is_pinned=True
+            ))
+
+        return compiled_grids
+
+
+================================================================================
+airevitlib/ui/__init__.py
+================================================================================
+
+
+
+================================================================================
+airevitlib/ui/forms.py
+================================================================================
+
+# airevitlib/ui/forms.py
+import clr
+clr.AddReference("System.Windows.Forms")
+clr.AddReference("System.Drawing")
+
+import System.Windows.Forms as WinForms
+import System.Drawing as Drawing
+import Autodesk.Revit.UI as UI
+
+class BIMConversationalDashboard(WinForms.Form):
+    """An interop-safe conversational dashboard with strictly typed .NET Fonts and clean inputs."""
+    
+    def __init__(self, saved_key: str, saved_model: str, fetch_models_func, on_query_callback):
+        super(BIMConversationalDashboard, self).__init__()
+        self.fetch_models_func = fetch_models_func
+        self.on_query_callback = on_query_callback
+        self.saved_model = saved_model
+        self.conversation_history = []
+        self.validated_payload = None
+        
+        self._build_interface(saved_key)
+        self._initialize_history()
+
+    def _build_interface(self, saved_key: str):
+        # 1. Main Form Settings
+        self.Text = "Conversational BIM Setup Dashboard"
+        self.Size = Drawing.Size(950, 650)
+        self.FormBorderStyle = WinForms.FormBorderStyle.FixedDialog
+        self.StartPosition = WinForms.FormStartPosition.CenterScreen
+        self.MaximizeBox = False
+        self.MinimizeBox = False
+        self.BackColor = Drawing.Color.FromArgb(245, 246, 248)
+
+        # 2. Configuration Top Bar Controls
+        self.lbl_api = WinForms.Label()
+        self.lbl_api.Text = "API Key:"
+        self.lbl_api.Location = Drawing.Point(20, 18)
+        self.lbl_api.Size = Drawing.Size(60, 20)
+        self.lbl_api.Font = Drawing.Font("Segoe UI", 9.0)
+        self.Controls.Add(self.lbl_api)
+
+        self.txt_api = WinForms.TextBox()
+        self.txt_api.Location = Drawing.Point(80, 15)
+        self.txt_api.Size = Drawing.Size(250, 23)
+        self.txt_api.Text = saved_key
+        self.txt_api.UseSystemPasswordChar = True
+        self.Controls.Add(self.txt_api)
+
+        self.cmb_models = WinForms.ComboBox()
+        self.cmb_models.Location = Drawing.Point(350, 15)
+        self.cmb_models.Size = Drawing.Size(180, 23)
+        self.cmb_models.DropDownStyle = WinForms.ComboBoxStyle.DropDownList
+        self.Controls.Add(self.cmb_models)
+
+        self.btn_load_models = WinForms.Button()
+        self.btn_load_models.Text = "Fetch Models"
+        self.btn_load_models.Location = Drawing.Point(540, 14)
+        self.btn_load_models.Size = Drawing.Size(100, 25)
+        self.btn_load_models.Click += self._on_fetch_clicked
+        self.Controls.Add(self.btn_load_models)
+
+        # 3. Left Panel: Conversational Workspace
+        self.panel_chat = WinForms.Panel()
+        self.panel_chat.Location = Drawing.Point(20, 55)
+        self.panel_chat.Size = Drawing.Size(540, 530)
+        self.panel_chat.BackColor = Drawing.Color.White
+        self.Controls.Add(self.panel_chat)
+
+        self.txt_chat_history = WinForms.TextBox()
+        self.txt_chat_history.Location = Drawing.Point(10, 10)
+        self.txt_chat_history.Size = Drawing.Size(520, 360)
+        self.txt_chat_history.Multiline = True
+        self.txt_chat_history.ReadOnly = True
+        self.txt_chat_history.ScrollBars = WinForms.ScrollBars.Vertical
+        self.txt_chat_history.Font = Drawing.Font("Segoe UI", 10.0)
+        self.txt_chat_history.BackColor = Drawing.Color.FromArgb(250, 250, 250)
+        self.panel_chat.Controls.Add(self.txt_chat_history)
+
+        self.txt_user_input = WinForms.TextBox()
+        self.txt_user_input.Location = Drawing.Point(10, 385)
+        self.txt_user_input.Size = Drawing.Size(520, 95)
+        self.txt_user_input.Multiline = True
+        self.txt_user_input.ScrollBars = WinForms.ScrollBars.Vertical
+        self.txt_user_input.Font = Drawing.Font("Segoe UI", 10.5)
+        self.txt_user_input.Text = ""  # Explicitly starts empty with no templates loaded
+        self.panel_chat.Controls.Add(self.txt_user_input)
+
+        self.btn_send = WinForms.Button()
+        self.btn_send.Text = "Submit Request"
+        self.btn_send.Location = Drawing.Point(380, 490)
+        self.btn_send.Size = Drawing.Size(150, 30)
+        self.btn_send.BackColor = Drawing.Color.FromArgb(50, 120, 220)
+        self.btn_send.ForeColor = Drawing.Color.White
+        self.btn_send.Font = Drawing.Font("Segoe UI", 9.0, Drawing.FontStyle.Bold)
+        self.btn_send.Click += self._on_submit_clicked
+        self.panel_chat.Controls.Add(self.btn_send)
+
+        # 4. Right Panel: Building Metrics & Transaction Output
+        self.panel_preview = WinForms.Panel()
+        self.panel_preview.Location = Drawing.Point(580, 55)
+        self.panel_preview.Size = Drawing.Size(330, 530)
+        self.panel_preview.BackColor = Drawing.Color.White
+        self.Controls.Add(self.panel_preview)
+
+        self.lbl_kpi_title = WinForms.Label()
+        self.lbl_kpi_title.Text = "ESTIMATED FOOTPRINT KPIs"
+        self.lbl_kpi_title.Location = Drawing.Point(15, 15)
+        self.lbl_kpi_title.Size = Drawing.Size(300, 20)
+        self.lbl_kpi_title.Font = Drawing.Font("Segoe UI", 10.0, Drawing.FontStyle.Bold)
+        self.lbl_kpi_title.ForeColor = Drawing.Color.FromArgb(70, 80, 95)
+        self.panel_preview.Controls.Add(self.lbl_kpi_title)
+
+        self.lbl_length = WinForms.Label()
+        self.lbl_length.Text = "Building Length (X):  --"
+        self.lbl_length.Location = Drawing.Point(15, 45)
+        self.lbl_length.Size = Drawing.Size(300, 20)
+        self.lbl_length.Font = Drawing.Font("Segoe UI", 9.5)
+        self.panel_preview.Controls.Add(self.lbl_length)
+
+        self.lbl_width = WinForms.Label()
+        self.lbl_width.Text = "Building Width (Y):   --"
+        self.lbl_width.Location = Drawing.Point(15, 70)
+        self.lbl_width.Size = Drawing.Size(300, 20)
+        self.lbl_width.Font = Drawing.Font("Segoe UI", 9.5)
+        self.panel_preview.Controls.Add(self.lbl_width)
+
+        self.lbl_height = WinForms.Label()
+        self.lbl_height.Text = "Building Height (Z):  --"
+        self.lbl_height.Location = Drawing.Point(15, 95)
+        self.lbl_height.Size = Drawing.Size(300, 20)
+        self.lbl_height.Font = Drawing.Font("Segoe UI", 9.5)
+        self.panel_preview.Controls.Add(self.lbl_height)
+
+        self.lbl_area = WinForms.Label()
+        self.lbl_area.Text = "Est. Footprint Area:  --"
+        self.lbl_area.Location = Drawing.Point(15, 120)
+        self.lbl_area.Size = Drawing.Size(300, 20)
+        self.lbl_area.Font = Drawing.Font("Segoe UI", 9.5)
+        self.panel_preview.Controls.Add(self.lbl_area)
+
+        self.lbl_actions_title = WinForms.Label()
+        self.lbl_actions_title.Text = "PROPOSED TRANSACTION LOG"
+        self.lbl_actions_title.Location = Drawing.Point(15, 160)
+        self.lbl_actions_title.Size = Drawing.Size(300, 20)
+        self.lbl_actions_title.Font = Drawing.Font("Segoe UI", 10.0, Drawing.FontStyle.Bold)
+        self.lbl_actions_title.ForeColor = Drawing.Color.FromArgb(70, 80, 95)
+        self.panel_preview.Controls.Add(self.lbl_actions_title)
+
+        self.lst_actions = WinForms.ListBox()
+        self.lst_actions.Location = Drawing.Point(15, 190)
+        self.lst_actions.Size = Drawing.Size(300, 240)
+        self.lst_actions.Font = Drawing.Font("Consolas", 8.5)
+        self.panel_preview.Controls.Add(self.lst_actions)
+
+        self.btn_execute = WinForms.Button()
+        self.btn_execute.Text = "Approve & Apply to Revit"
+        self.btn_execute.Location = Drawing.Point(15, 480)
+        self.btn_execute.Size = Drawing.Size(300, 38)
+        self.btn_execute.BackColor = Drawing.Color.FromArgb(40, 160, 90)
+        self.btn_execute.ForeColor = Drawing.Color.White
+        self.btn_execute.Font = Drawing.Font("Segoe UI", 10.0, Drawing.FontStyle.Bold)
+        self.btn_execute.Enabled = False
+        self.btn_execute.DialogResult = WinForms.DialogResult.OK
+        self.panel_preview.Controls.Add(self.btn_execute)
+
+        if saved_key:
+            self._fetch_models()
+
+    def _initialize_history(self):
+        self.txt_chat_history.AppendText("AI Assistant: Send a message to inspect the current Revit layout.\r\n\r\n")
+
+    def _on_fetch_clicked(self, sender, event):
+        self._fetch_models()
+
+    def _fetch_models(self):
+        key = self.txt_api.Text.strip()
+        if not key: return
+        try:
+            items = self.fetch_models_func(key)
+            self.cmb_models.Items.Clear()
+            idx = 0
+            for i, val in enumerate(items):
+                self.cmb_models.Items.Add(val["id"])
+                if val["id"] == self.saved_model: idx = i
+            if self.cmb_models.Items.Count > 0:
+                self.cmb_models.SelectedIndex = idx
+        except Exception:
+            self.cmb_models.Items.Clear()
+            for val in ["gemini-2.5-flash", "gemini-2.5-pro"]:
+                self.cmb_models.Items.Add(val)
+            self.cmb_models.SelectedIndex = 0
+
+    def _on_submit_clicked(self, sender, event):
+        user_input = self.txt_user_input.Text.strip()
+        if not user_input: return
+
+        self.txt_chat_history.AppendText(f"User: {user_input}\r\n\r\n")
+        self.txt_user_input.Clear()
+        self.btn_send.Enabled = False
+        self.txt_chat_history.AppendText("Processing layout verification...\r\n")
+        self.Update()
+
+        api_key = self.txt_api.Text.strip()
+        selected_model = str(self.cmb_models.SelectedItem or "gemini-2.5-flash")
+        
+        try:
+            response_payload = self.on_query_callback(user_input, api_key, selected_model)
+            self._render_ai_response(response_payload)
+        except Exception as e:
+            self.txt_chat_history.AppendText(f"AI Assistant Error: {e}\r\n\r\n")
+        finally:
+            self.btn_send.Enabled = True
+
+    def _render_ai_response(self, payload: dict):
+        self.txt_chat_history.AppendText(f"AI Assistant: {payload.get('clarification_message')}\r\n\r\n")
+        
+        # Display dynamic metrics using defensive formatting
+        kpis = payload.get("kpis") or {}
+        
+        def safe_format(val) -> str:
+            if val is None:
+                return "0.0"
+            try:
+                return f"{float(val):.1f}"
+            except (ValueError, TypeError):
+                return "0.0"
+
+        self.lbl_length.Text = f"Building Length (X):  {safe_format(kpis.get('total_length_m'))} m"
+        self.lbl_width.Text  = f"Building Width (Y):   {safe_format(kpis.get('total_width_m'))} m"
+        self.lbl_height.Text = f"Building Height (Z):  {safe_format(kpis.get('total_height_m'))} m"
+        self.lbl_area.Text   = f"Est. Footprint Area:  {safe_format(kpis.get('footprint_area_sqm'))} sqm"
+
+        # Update action logs
+        self.lst_actions.Items.Clear()
+        delta = payload.get("proposed_delta") or {}
+
+        # Parse Level actions safely
+        levels_section = delta.get("levels") or {}
+        for l in levels_section.get("create") or []:
+            self.lst_actions.Items.Add(f"[+] LVL: Create {l['name']} @ {l['elevation']}m")
+        for l in levels_section.get("update") or []:
+            self.lst_actions.Items.Add(f"[*] LVL: Update {l['name']} @ {l['elevation']}m")
+        for l in levels_section.get("delete") or []:
+            self.lst_actions.Items.Add(f"[-] LVL: Delete {l}")
+
+        # Parse Grid actions safely
+        grids_section = delta.get("grids") or {}
+        for g in grids_section.get("create") or []:
+            self.lst_actions.Items.Add(f"[+] GRD: Create Axis {g['axis']}-{g['name']} @ {g['position']}m")
+        for g in grids_section.get("update") or []:
+            self.lst_actions.Items.Add(f"[*] GRD: Update Axis {g['axis']}-{g['name']} @ {g['position']}m")
+        for g in grids_section.get("delete") or []:
+            self.lst_actions.Items.Add(f"[-] GRD: Delete {g}")
+
+        # Enable/disable button based on validation status
+        self.btn_execute.Enabled = bool(payload.get("is_valid", False))
+        self.validated_payload = payload
+
+
+class BIMMessageService:
+    @staticmethod
+    def show_error(message: str):
+        dialog = UI.TaskDialog("AI Revit Agent - Setup Blocked")
+        dialog.MainInstruction = "Operation Aborted"
+        dialog.MainContent = message
+        dialog.CommonButtons = UI.TaskDialogCommonButtons.Ok
+        dialog.Show()
+
 
 ================================================================================
 extension/AIRevit.extension/AI Revit.tab/Columns.panel/Create Columns.pushbutton/script.py
@@ -84,226 +1078,113 @@ if PROJECT_ROOT not in sys.path:
 
 
 
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/Columns.panel/layout
+================================================================================
+
+Create Columns.pushbutton
+
+
+
 ================================================================================
 extension/AIRevit.extension/AI Revit.tab/Generation.panel/BuildFromAI.pushbutton/script.py
 ================================================================================
 
 #! python3
 # -*- coding: utf-8 -*-
-__title__ = 'Build\nFrom AI'
-__author__ = 'BIM Manager'
+"""
+Title:       Build From AI
+Author:      BIM Manager
+Description: Dynamic entrypoint for the structural AI pipeline setup with Hot-Reload.
+"""
 
-import Autodesk.Revit.DB as DB
-import Autodesk.Revit.UI as UI
 import os
 import sys
 import importlib
 
+# Locate the project root dynamically by searching upwards for the 'airevitlib' package
 current_dir = os.path.dirname(__file__)
-lib_path = os.path.abspath(os.path.join(current_dir, "../../../../../lib"))
+project_root = current_dir
+
+while project_root:
+    if os.path.exists(os.path.join(project_root, "airevitlib")):
+        break
+    parent = os.path.dirname(project_root)
+    if parent == project_root:  # Reached the drive root
+        project_root = current_dir  # Fallback to local
+        break
+    project_root = parent
+
+lib_path = os.path.join(project_root, "airevitlib")
 if lib_path not in sys.path:
     sys.path.insert(0, lib_path)
 
-import dtos
-import payload_manager
-import coordinate_utility
-import revit_managers.level_manager
-import revit_managers.grid_manager
+# Import all custom library modules first
+import core.models
+import core.config
+import services.ai
+import services.compiler
+import services.auditor
+import revit.coordinates
+import revit.elements
+import ui.forms
+import core.orchestrator
 
-importlib.reload(dtos)
-importlib.reload(payload_manager)
-importlib.reload(coordinate_utility)
-importlib.reload(revit_managers.level_manager)
-importlib.reload(revit_managers.grid_manager)
+# Force dynamic hot-reloading of all files from disk on every single button click
+importlib.reload(core.models)
+importlib.reload(core.config)
+importlib.reload(services.ai)
+importlib.reload(services.compiler)
+importlib.reload(services.auditor)
+importlib.reload(revit.coordinates)
+importlib.reload(revit.elements)
+importlib.reload(ui.forms)
+importlib.reload(core.orchestrator)
 
-from payload_manager import PayloadManager
-from coordinate_utility import CoordinateUtility
-from revit_managers.level_manager import LevelManager
-from revit_managers.grid_manager import GridManager
+from core.orchestrator import StructuralBIMAgentOrchestrator
 
+# Active Document reference
 doc = __revit__.ActiveUIDocument.Document
 
-# High-fidelity simulated Multi-Use Tower structural data payload
-AI_JSON_PAYLOAD = """
-{
-    "settings": {
-        "grids_unit": "mm",
-        "levels_unit": "mm",
-        "coordinate_system": "project_base_point"
-    },
-    "level_strategy": {
-        "mode": "explicit",
-        "link_name": null,
-        "prefix_copied_levels": ""
-    },
-    "grid_strategy": {
-        "mode": "explicit",
-        "link_name": null,
-        "prefix_copied_grids": ""
-    },
-    "levels": [
-        {"id": "lvl_b2", "name": "B2 - Foundation Slab", "elevation": -7200.0, "is_pinned": true, "create_floor_plan": false},
-        {"id": "lvl_b1", "name": "B1 - Parking Garage", "elevation": -3600.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l0", "name": "L0 - Entrance Lobby (PBP)", "elevation": 0.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l1", "name": "L1 - Retail Mezzanine", "elevation": 4800.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l2", "name": "L2 - Office Typical 01", "elevation": 9000.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l3", "name": "L3 - Office Typical 02", "elevation": 12800.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l4", "name": "L4 - Office Typical 03", "elevation": 16600.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l5", "name": "L5 - Mechanical & Plant", "elevation": 20400.0, "is_pinned": true, "create_floor_plan": false},
-        {"id": "lvl_l6", "name": "L6 - Residential Amenity", "elevation": 24600.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l7", "name": "L7 - Residential Typical 01", "elevation": 27800.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l8", "name": "L8 - Residential Typical 02", "elevation": 31000.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l9", "name": "L9 - Residential Typical 03", "elevation": 34200.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_l10", "name": "L10 - Penthouse Suite", "elevation": 37400.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_roof", "name": "Roof Deck / Terrace", "elevation": 41200.0, "is_pinned": true, "create_floor_plan": true},
-        {"id": "lvl_para", "name": "Top of Parapet", "elevation": 42700.0, "is_pinned": false, "create_floor_plan": false}
-    ],
-    "grids": [
-        {"id": "g_1", "name": "1", "start": {"x": 0.0, "y": -4000.0}, "end": {"x": 0.0, "y": 44000.0}, "is_pinned": true},
-        {"id": "g_2", "name": "2", "start": {"x": 6000.0, "y": -4000.0}, "end": {"x": 6000.0, "y": 44000.0}, "is_pinned": true},
-        {"id": "g_3", "name": "3", "start": {"x": 14000.0, "y": -4000.0}, "end": {"x": 14000.0, "y": 44000.0}, "is_pinned": true},
-        {"id": "g_4", "name": "4", "start": {"x": 22000.0, "y": -4000.0}, "end": {"x": 22000.0, "y": 44000.0}, "is_pinned": true},
-        {"id": "g_5", "name": "5", "start": {"x": 28000.0, "y": -4000.0}, "end": {"x": 28000.0, "y": 44000.0}, "is_pinned": true},
-        {"id": "g_6", "name": "6", "start": {"x": 37000.0, "y": -4000.0}, "end": {"x": 37000.0, "y": 44000.0}, "is_pinned": true},
-        
-        {"id": "g_a", "name": "A", "start": {"x": -4000.0, "y": 0.0}, "end": {"x": 41000.0, "y": 0.0}, "is_pinned": true},
-        {"id": "g_b", "name": "B", "start": {"x": -4000.0, "y": 7500.0}, "end": {"x": 41000.0, "y": 7500.0}, "is_pinned": true},
-        {"id": "g_c", "name": "C", "start": {"x": -4000.0, "y": 15000.0}, "end": {"x": 41000.0, "y": 15000.0}, "is_pinned": true},
-        {"id": "g_d", "name": "D", "start": {"x": -4000.0, "y": 21000.0}, "end": {"x": 41000.0, "y": 21000.0}, "is_pinned": true},
-        {"id": "g_e", "name": "E", "start": {"x": -4000.0, "y": 29500.0}, "end": {"x": 41000.0, "y": 29500.0}, "is_pinned": true},
-        {"id": "g_f", "name": "F", "start": {"x": -4000.0, "y": 38000.0}, "end": {"x": 41000.0, "y": 38000.0}, "is_pinned": true}
-    ]
-}
-"""
-
-def generate_dry_run_report(p_data, level_mgr, grid_mgr) -> str:
-    """Pre-flight dry-run check displaying original payload coordinates."""
-    levels_to_create = []
-    levels_to_update = []
-    grids_to_create = []
-    grids_to_update = []
-
-    l_unit = p_data.settings.levels_unit
-    g_unit = p_data.settings.grids_unit
-    
-    l_mult = PayloadManager.UNIT_MULTIPLIERS.get(l_unit.lower(), 1.0)
-
-    # Process Levels
-    for l_data in p_data.levels:
-        display_elevation = round(l_data.elevation / l_mult, 1)
-        existing = level_mgr._level_cache.get(l_data.id) or level_mgr._level_cache.get(l_data.name)
-        if existing:
-            existing_val = round(existing.Elevation / l_mult, 1)
-            levels_to_update.append(f"• {l_data.name} [ID: {l_data.id}] ({existing_val} -> {display_elevation} {l_unit})")
-        else:
-            levels_to_create.append(f"• {l_data.name} [ID: {l_data.id}] ({display_elevation} {l_unit})")
-
-    # Process Grids
-    for g_data in p_data.grids:
-        existing = grid_mgr._grid_cache.get(g_data.id) or grid_mgr._grid_cache.get(g_data.name)
-        if existing:
-            grids_to_update.append(f"• Grid {g_data.name} [ID: {g_data.id}]")
-        else:
-            grids_to_create.append(f"• Grid {g_data.name} [ID: {g_data.id}]")
-
-    report = "AI AGENT TRANSACTION PREVIEW\n"
-    report += "==================================\n\n"
-    report += f"Coordinate Origin: {p_data.settings.coordinate_system.upper()}\n"
-    report += f"Unit Profiles:     Levels: {l_unit.upper()} | Grids: {g_unit.upper()}\n\n"
-    
-    report += f"LEVEL CHANGES ({len(levels_to_create)} New, {len(levels_to_update)} Update):\n"
-    for item in levels_to_create: report += f"  [+] Create {item}\n"
-    for item in levels_to_update: report += f"  [*] Update {item}\n"
-    
-    report += f"\nGRID CHANGES ({len(grids_to_create)} New, {len(grids_to_update)} Update):\n"
-    for item in grids_to_create: report += f"  [+] Create {item}\n"
-    for item in grids_to_update: report += f"  [*] Update {item}\n"
-    
-    return report
-
-def show_preview_dialog(report_text: str) -> bool:
-    """Prompt confirm dialog box using corrected UI namespace."""
-    dialog = UI.TaskDialog("AI Revit Agent Preview")
-    dialog.MainInstruction = "Do you want to apply these model changes?"
-    dialog.MainContent = report_text
-    dialog.CommonButtons = UI.TaskDialogCommonButtons.Yes | UI.TaskDialogCommonButtons.No
-    dialog.DefaultButton = UI.TaskDialogResult.Yes
-    
-    result = dialog.Show()
-    return result == UI.TaskDialogResult.Yes
-
 def main():
-    print("🚀 Initializing BIM AI Agent...")
-    try:
-        payload = PayloadManager(AI_JSON_PAYLOAD)
-        p_data = payload.project_data
-    except Exception as e:
-        print(f"❌ Invalid AI Data: {e}")
-        return
-
-    # Initialize Coordinate Utility
-    coord_util = CoordinateUtility(doc, p_data.settings.coordinate_system)
-    
-    level_mgr = LevelManager(doc, coord_util)
-    grid_mgr = GridManager(doc, coord_util)
-
-    # 1. Run Analysis and Generate Dry-Run Preview report
-    report = generate_dry_run_report(p_data, level_mgr, grid_mgr)
-    
-    # 2. Present Confirmation Dialog
-    if not show_preview_dialog(report):
-        print("⚠️ Transaction aborted by user.")
-        return
-
-    # 3. Open Transaction to Write Changes
-    t = DB.Transaction(doc, "AI Agent: Generate Structure")
-    t.Start()
-    
-    try:
-        print("\n🏗️ Processing Levels...")
-        for lvl_data in p_data.levels:
-            level_mgr.process_from_payload(lvl_data)
-
-        print("\n📐 Processing Grids...")
-        for grid_data in p_data.grids:
-            grid_mgr.process_from_payload(grid_data)
-
-        # --- THE EXTENTS COORDINATION SEQUENCE ---
-        # Regenerate to calculate the base structural coordinates
-        doc.Regenerate() 
-        
-        all_levels = DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements()
-        all_grids = DB.FilteredElementCollector(doc).OfClass(DB.Grid).ToElements()
-        
-        # Step 1: Maximize Grids vertically first.
-        # This forces the grid planes to cross every level from bottom to top.
-        print("\n📏 Aligning Grid Vertical Extents...")
-        for grid in all_grids:
-            grid.Maximize3DExtents()
-
-        # Regenerate again so Revit registers the new, tall 3D grid column bounds
-        doc.Regenerate() 
-
-        # Step 2: Maximize Levels. 
-        # Since the grids now span all levels, Revit will snap the level lines
-        # perfectly to the horizontal limits of the grids!
-        print("📏 Aligning Level Horizontal Extents...")
-        for lvl in all_levels:
-            lvl.Maximize3DExtents()
-
-        t.Commit()
-        print("\n🎉 Model Generation Complete!")
-        
-    except Exception as e:
-        t.RollBack()
-        print(f"\n💥 FATAL REVIT ERROR: Transaction Rolled Back.\n{e}")
+    agent = StructuralBIMAgentOrchestrator(doc, project_root)
+    agent.run_pipeline()
 
 if __name__ == "__main__":
     main()
 
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/Generation.panel/layout
+================================================================================
+
+BuildFromAI.pushbutton
+
+
+
 ================================================================================
 extension/AIRevit.extension/AI Revit.tab/Grids.panel/Create Grids.pushbutton/script.py
 ================================================================================
+
+
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/Grids.panel/layout
+================================================================================
+
+Create Grids.pushbutton
+
+
+
+================================================================================
+extension/AIRevit.extension/AI Revit.tab/layout
+================================================================================
+
+Generation.panel
+Levels.panel
+Grids.panel
+Columns.panel
 
 
 
@@ -314,457 +1195,23 @@ extension/AIRevit.extension/AI Revit.tab/Levels.panel/Create Levels.pushbutton/s
 
 
 ================================================================================
-lib/__init__.py
+extension/AIRevit.extension/AI Revit.tab/Levels.panel/layout
 ================================================================================
 
-
-
-================================================================================
-lib/coordinate_utility.py
-================================================================================
-
-# coordinate_utility.py
-import math
-import Autodesk.Revit.DB as DB
-
-class CoordinateUtility:
-    """Calculates pure Python 2D/3D coordinate transformations."""
-    
-    def __init__(self, doc: DB.Document, system_type: str):
-        self.doc = doc
-        self.system_type = system_type.lower()
-        self.translation, self.rotation_angle = self._get_coordinate_system_data()
-
-    def _get_coordinate_system_data(self):
-        """Extracts translation translation point and conditional rotation angle."""
-        translation = DB.XYZ.Zero
-        rotation = 0.0  # Default to zero rotation (Project North)
-
-        if self.system_type == "internal_origin":
-            return translation, rotation
-
-        # Fetch Project Base Point or Survey Point
-        category = DB.BuiltInCategory.OST_ProjectBasePoint
-        if self.system_type == "survey_point":
-            category = DB.BuiltInCategory.OST_SharedBasePoint
-
-        base_point = DB.FilteredElementCollector(self.doc) \
-            .OfCategory(category) \
-            .WhereElementIsNotElementType() \
-            .FirstElement()
-
-        if base_point:
-            bbox = base_point.get_BoundingBox(None)
-            if bbox:
-                translation = (bbox.Min + bbox.Max) * 0.5
-            
-            # ONLY apply True North rotation if aligning to the geographical Survey Point.
-            # Project Base Point grids align to Project North (0.0 rotation).
-            if self.system_type == "survey_point":
-                project_location = self.doc.ActiveProjectLocation
-                if project_location:
-                    project_pos = project_location.GetProjectPosition(DB.XYZ.Zero)
-                    if project_pos:
-                        rotation = project_pos.Angle
-
-        return translation, rotation
-
-    def transform_point(self, x: float, y: float, z: float = 0.0) -> DB.XYZ:
-        """Applies manual 2D rotation and 3D translation offset."""
-        cos_a = math.cos(self.rotation_angle)
-        sin_a = math.sin(self.rotation_angle)
-        
-        # 1. Rotate coordinates
-        rotated_x = x * cos_a - y * sin_a
-        rotated_y = x * sin_a + y * cos_a
-
-        # 2. Translate coordinates relative to origin base point
-        final_x = rotated_x + self.translation.X
-        final_y = rotated_y + self.translation.Y
-        final_z = z + self.translation.Z
-
-        return DB.XYZ(final_x, final_y, final_z)
-
-================================================================================
-lib/dtos.py
-================================================================================
-
-# dtos.py
-import math
-from dataclasses import dataclass, field
-from typing import List, Optional
-
-@dataclass
-class Point2D:
-    x: float
-    y: float
-    
-    def distance_to(self, other: 'Point2D') -> float:
-        return math.sqrt((self.x - other.x)**2 + (self.y - other.y)**2)
-
-@dataclass
-class LevelData:
-    id: str  # Stable ID for database syncing
-    name: str
-    elevation: float
-    is_pinned: bool = True
-    create_floor_plan: bool = True
-
-@dataclass
-class GridData:
-    id: str  # Stable ID for database syncing
-    name: str
-    start: Point2D
-    end: Point2D
-    is_pinned: bool = True
-
-@dataclass
-class LevelStrategy:
-    mode: str = "explicit"  # "explicit" or "link"
-    link_name: Optional[str] = None
-    prefix_copied_levels: str = ""
-
-@dataclass
-class GridStrategy:
-    mode: str = "explicit"  # "explicit" or "link"
-    link_name: Optional[str] = None
-    prefix_copied_grids: str = ""
-
-@dataclass
-class ProjectSettings:
-    grids_unit: str = "m"   
-    levels_unit: str = "m"  
-    # "project_base_point", "survey_point", or "internal_origin"
-    coordinate_system: str = "project_base_point"
-
-@dataclass
-class ProjectData:
-    settings: ProjectSettings = field(default_factory=ProjectSettings)
-    level_strategy: LevelStrategy = field(default_factory=LevelStrategy)
-    grid_strategy: GridStrategy = field(default_factory=GridStrategy)
-    levels: List[LevelData] = field(default_factory=list)
-    grids: List[GridData] = field(default_factory=list)
-
-================================================================================
-lib/payload_manager.py
-================================================================================
-
-# payload_manager.py
-import json
-from dtos import Point2D, LevelData, GridData, ProjectData, ProjectSettings, GridStrategy, LevelStrategy
-
-class PayloadManager:
-    UNIT_MULTIPLIERS = {
-        "m": 3.280839895,
-        "mm": 0.0032808399,
-        "cm": 0.032808399,
-        "ft": 1.0,
-        "in": 0.0833333333
-    }
-
-    def __init__(self, raw_json_string: str):
-        self.raw_json = raw_json_string
-        self.project_data = self._parse_payload(raw_json_string)
-
-    def _convert(self, val: float, unit: str) -> float:
-        multiplier = self.UNIT_MULTIPLIERS.get(unit.lower(), 1.0)
-        return val * multiplier
-
-    def _parse_payload(self, json_str: str) -> ProjectData:
-        try:
-            data = json.loads(json_str)
-            
-            s_data = data.get("settings", {})
-            settings = ProjectSettings(
-                grids_unit=s_data.get("grids_unit", "m"),
-                levels_unit=s_data.get("levels_unit", "m"),
-                coordinate_system=s_data.get("coordinate_system", "project_base_point")
-            )
-
-            level_strategy = LevelStrategy(**data.get("level_strategy", {}))
-            grid_strategy = GridStrategy(**data.get("grid_strategy", {}))
-
-            levels = []
-            for lvl in data.get("levels", []):
-                elev = self._convert(lvl["elevation"], settings.levels_unit)
-                # Fallback to name if ID is missing
-                lvl_id = lvl.get("id", "lvl_" + lvl["name"].lower().replace(" ", "_"))
-                levels.append(LevelData(
-                    id=lvl_id,
-                    name=lvl["name"], 
-                    elevation=elev, 
-                    is_pinned=lvl.get("is_pinned", True),
-                    create_floor_plan=lvl.get("create_floor_plan", True)
-                ))
-            
-            grids = []
-            for grd in data.get("grids", []):
-                sx = self._convert(grd["start"]["x"], settings.grids_unit)
-                sy = self._convert(grd["start"]["y"], settings.grids_unit)
-                ex = self._convert(grd["end"]["x"], settings.grids_unit)
-                ey = self._convert(grd["end"]["y"], settings.grids_unit)
-                
-                grd_id = grd.get("id", "grid_" + grd["name"].lower().replace(" ", "_"))
-                grids.append(GridData(
-                    id=grd_id,
-                    name=grd["name"], 
-                    start=Point2D(sx, sy), 
-                    end=Point2D(ex, ey),
-                    is_pinned=grd.get("is_pinned", True)
-                ))
-                
-            return ProjectData(
-                settings=settings, 
-                level_strategy=level_strategy,
-                grid_strategy=grid_strategy, 
-                levels=levels, 
-                grids=grids
-            )
-            
-        except Exception as e:
-            raise ValueError(f"Payload parsing failed: {e}")
-
-================================================================================
-lib/revit_managers/__init__.py
-================================================================================
+Create Levels.pushbutton
 
 
 
 ================================================================================
-lib/revit_managers/grid_manager.py
+payload.json
 ================================================================================
 
-# revit_managers/grid_manager.py
-import Autodesk.Revit.DB as DB
-from typing import Optional
-from dtos import GridData
-from coordinate_utility import CoordinateUtility
+{
+    "project_name": "",
+    "units": "mm",
+    "coordinate_system": "project_base_point",
+    "levels": [],
+    "grids": {}
+}
 
-class GridManager:
-    TRACKING_PREFIX = "AI_ID:GRD:"
 
-    def __init__(self, doc: DB.Document, coord_utility: CoordinateUtility):
-        self.doc = doc
-        self.coord_utility = coord_utility
-        self._grid_cache = self._build_grid_cache()
-        self.lowest_elevation = self._get_lowest_level_elevation()
-
-    def _get_lowest_level_elevation(self) -> float:
-        """Strategy 1: Identifies the lowest level elevation to project the horizontal grid line."""
-        levels = DB.FilteredElementCollector(self.doc).OfClass(DB.Level).ToElements()
-        if levels:
-            return min([lvl.Elevation for lvl in levels])
-        return 0.0
-
-    def _build_grid_cache(self):
-        """Strategy 4: Indexes cached grid elements using the tracking ID inside standard Comments."""
-        cache = {}
-        grids = DB.FilteredElementCollector(self.doc).OfClass(DB.Grid).ToElements()
-        for grid in grids:
-            tracking_id = self._get_tracking_id(grid)
-            if tracking_id:
-                cache[tracking_id] = grid
-            else:
-                cache[grid.Name] = grid
-        return cache
-
-    def _get_tracking_id(self, grid: DB.Grid) -> Optional[str]:
-        param = grid.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-        if param and param.HasValue and param.AsString().startswith(self.TRACKING_PREFIX):
-            return param.AsString().replace(self.TRACKING_PREFIX, "")
-        return None
-
-    def _set_tracking_id(self, grid: DB.Grid, element_id: str):
-        param = grid.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-        if param:
-            param.Set(f"{self.TRACKING_PREFIX}{element_id}")
-
-    def process_from_payload(self, grid_data: GridData) -> DB.Grid:
-        # Match using tracking identifier, falling back to name
-        existing_grid = self._grid_cache.get(grid_data.id) or self._grid_cache.get(grid_data.name)
-        if existing_grid:
-            if existing_grid.Name != grid_data.name:
-                try: 
-                    existing_grid.Name = grid_data.name
-                except: 
-                    pass
-            self.pin(existing_grid, grid_data.is_pinned)
-            return existing_grid
-
-        # Strategy 1: Place grid curve on the lowest project elevation plane
-        start_xyz = self.coord_utility.transform_point(grid_data.start.x, grid_data.start.y, self.lowest_elevation)
-        end_xyz = self.coord_utility.transform_point(grid_data.end.x, grid_data.end.y, self.lowest_elevation)
-
-        try:
-            line = DB.Line.CreateBound(start_xyz, end_xyz)
-            new_grid = DB.Grid.Create(self.doc, line)
-            
-            try:
-                new_grid.Name = grid_data.name
-            except:
-                pass 
-            
-            self._set_tracking_id(new_grid, grid_data.id)
-            self.pin(new_grid, grid_data.is_pinned)
-            
-            self._grid_cache[grid_data.id] = new_grid
-            return new_grid
-            
-        except Exception as e:
-            print(f"Error creating Grid '{grid_data.name}': {e}")
-            return None
-
-    def pin(self, grid: DB.Grid, state: bool = True):
-        if grid and grid.Pinned != state:
-            grid.Pinned = state
-
-================================================================================
-lib/revit_managers/level_manager.py
-================================================================================
-
-# revit_managers/level_manager.py
-import Autodesk.Revit.DB as DB
-from typing import Optional
-from dtos import LevelData
-from coordinate_utility import CoordinateUtility
-
-class LevelManager:
-    TRACKING_PREFIX = "AI_ID:LVL:"
-
-    def __init__(self, doc: DB.Document, coord_utility: CoordinateUtility):
-        self.doc = doc
-        self.coord_utility = coord_utility
-        self._level_cache = self._build_level_cache()
-        self._view_family_types = self._get_view_family_types()
-
-    def _build_level_cache(self):
-        """Caches elements using our persistent tracking ID instead of Name (Strategy 4)."""
-        cache = {}
-        levels = DB.FilteredElementCollector(self.doc).OfClass(DB.Level).ToElements()
-        for lvl in levels:
-            tracking_id = self._get_tracking_id(lvl)
-            if tracking_id:
-                cache[tracking_id] = lvl
-            else:
-                # Fallback to Name if it hasn't been tagged by our tool yet
-                cache[lvl.Name] = lvl
-        return cache
-
-    def _get_tracking_id(self, level: DB.Level) -> Optional[str]:
-        param = level.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-        if param and param.HasValue and param.AsString().startswith(self.TRACKING_PREFIX):
-            return param.AsString().replace(self.TRACKING_PREFIX, "")
-        return None
-
-    def _set_tracking_id(self, level: DB.Level, element_id: str):
-        param = level.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-        if param:
-            param.Set(f"{self.TRACKING_PREFIX}{element_id}")
-
-    def _get_view_family_types(self):
-        vft_col = DB.FilteredElementCollector(self.doc).OfClass(DB.ViewFamilyType).ToElements()
-        return {vft.ViewFamily: vft for vft in vft_col}
-
-    def process_from_payload(self, level_data: LevelData) -> DB.Level:
-        # Resolve target coordinate Z value via our math-based utility
-        transformed_point = self.coord_utility.transform_point(0.0, 0.0, level_data.elevation)
-        target_elev = transformed_point.Z
-
-        # Attempt tracking match via unique Stable ID first, then fallback to Name
-        existing_level = self._level_cache.get(level_data.id) or self._level_cache.get(level_data.name)
-
-        if existing_level:
-            if abs(existing_level.Elevation - target_elev) > 0.001:
-                existing_level.Elevation = target_elev
-            if existing_level.Name != level_data.name:
-                existing_level.Name = level_data.name
-            level = existing_level
-        else:
-            level = DB.Level.Create(self.doc, target_elev)
-            level.Name = level_data.name
-        
-        # Write tracking ID to comments parameter
-        self._set_tracking_id(level, level_data.id)
-        self.pin(level, level_data.is_pinned)
-        
-        # Update cache mapping
-        self._level_cache[level_data.id] = level
-
-        if level_data.create_floor_plan:
-            self.create_plan_view(level, DB.ViewFamily.FloorPlan)
-
-        return level
-
-    def pin(self, level: DB.Level, state: bool = True):
-        if level.Pinned != state:
-            level.Pinned = state
-
-    def create_plan_view(self, level: DB.Level, view_family: DB.ViewFamily) -> Optional[DB.ViewPlan]:
-        view_type = self._view_family_types.get(view_family)
-        if not view_type: 
-            return None
-
-        existing_views = DB.FilteredElementCollector(self.doc).OfClass(DB.ViewPlan).ToElements()
-        for view in existing_views:
-            if view.GenLevel and view.GenLevel.Id == level.Id and view.GetTypeId() == view_type.Id:
-                return view 
-
-        return DB.ViewPlan.Create(self.doc, view_type.Id, level.Id)
-
-================================================================================
-lib/revit_managers/link_manager.py
-================================================================================
-
-import Autodesk.Revit.DB as DB
-
-class LinkManager:
-    """Dedicated class for handling operations with Revit Links."""
-    
-    def __init__(self, doc: DB.Document):
-        self.doc = doc
-
-    def get_link_instance(self, link_name: str) -> DB.RevitLinkInstance:
-        links = DB.FilteredElementCollector(self.doc).OfClass(DB.RevitLinkInstance).ToElements()
-        return next((L for L in links if link_name.lower() in L.Name.lower()), None)
-
-    def copy_elements(self, link_name: str, db_class, prefix: str = "") -> list:
-        """Generic method to copy any class of elements from a link."""
-        target_link = self.get_link_instance(link_name)
-        if not target_link:
-            print(f"❌ Link '{link_name}' not found.")
-            return []
-
-        link_doc = target_link.GetLinkDocument()
-        linked_elements = DB.FilteredElementCollector(link_doc).OfClass(db_class).WhereElementIsNotElementType().ToElements()
-        
-        element_ids = [e.Id for e in linked_elements]
-        if not element_ids: 
-            return []
-
-        transform = target_link.GetTotalTransform()
-        options = DB.CopyPasteOptions()
-        copied_ids = DB.ElementTransformUtils.CopyElements(
-            link_doc, 
-            DB.List[DB.ElementId](element_ids), 
-            self.doc, 
-            transform, 
-            options
-        )
-        
-        copied_elements = []
-        for c_id in copied_ids:
-            element = self.doc.GetElement(c_id)
-            if prefix and hasattr(element, "Name"):
-                try: 
-                    element.Name = f"{prefix}{element.Name}"
-                except: 
-                    pass
-            copied_elements.append(element)
-            
-        return copied_elements
-
-    def copy_grids(self, link_name: str, prefix: str = "") -> list:
-        return self.copy_elements(link_name, DB.Grid, prefix)
-
-    def copy_levels(self, link_name: str, prefix: str = "") -> list:
-        return self.copy_elements(link_name, DB.Level, prefix)

@@ -11,7 +11,7 @@ class ConfigManager:
     def load_config(self) -> dict:
         config = {
             "api_key": os.environ.get("GEMINI_API_KEY", ""),
-            "selected_model": "gemini-2.5-flash"
+            "selected_model": "gemini-flash-lite-latest"
         }
         if os.path.exists(self.config_path):
             try:
@@ -20,7 +20,11 @@ class ConfigManager:
                     if data.get("api_key"):
                         config["api_key"] = data["api_key"].strip()
                     if data.get("selected_model"):
-                        config["selected_model"] = data["selected_model"].strip()
+                        model = data["selected_model"].strip()
+                        # Auto-upgrade old cached default model to the new preferred default
+                        if model == "gemini-2.5-flash":
+                            model = "gemini-flash-lite-latest"
+                        config["selected_model"] = model
             except:
                 pass
         return config
