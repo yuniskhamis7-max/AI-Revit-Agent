@@ -38,7 +38,9 @@ class DirectUnitCompiler:
         compiled = []
         creates = self.delta.get("levels", {}).get("create", [])
         updates = self.delta.get("levels", {}).get("update", [])
-        
+        deletes = set(self.delta.get("levels", {}).get("delete", []))
+
+        delta_ids = set()
         for l in (creates + updates):
             compiled.append(LevelModel(
                 id=l["id"],
@@ -47,11 +49,26 @@ class DirectUnitCompiler:
                 is_pinned=True,
                 create_floor_plan=l.get("create_floor_plan", True)
             ))
+            delta_ids.add(l["id"])
+            delta_ids.add(l["name"])
+
+        # Add preserved levels (levels currently in Revit that are not being modified or deleted)
+        for l in self.existing.get("levels", []):
+            l_id = l["id"]
+            l_name = l["name"]
+            
+            if l_id not in deletes and l_name not in deletes and l_id not in delta_ids and l_name not in delta_ids:
+                compiled.append(LevelModel(
+                    id=l_id,
+                    name=l_name,
+                    elevation=float(l.get("elevation_m", 0.0)) * self.scale,
+                    is_pinned=True,
+                    create_floor_plan=True
+                ))
         return compiled
 
     def _compile_grids(self) -> list:
         # 1. Gather all target grid elements to compile
-        # We start with proposed creations and updates from the AI's delta payload
         grid_data_list = []
         delta_ids = set()
         

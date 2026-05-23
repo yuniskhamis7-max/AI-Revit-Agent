@@ -72,51 +72,61 @@ class StructuralBIMAgentOrchestrator:
             # Match exactly one element per active name, flag all duplicates and leftover elements for deletion
             matched_level_names = set()
             to_delete_levels = []
-            all_levels = DB.FilteredElementCollector(self.doc) \
-                .OfClass(DB.Level) \
-                .WhereElementIsNotElementType() \
-                .ToElements()
-                
-            for lvl in all_levels:
-                if not lvl.IsValidObject:
-                    continue
-                tracking_id = self.manager._get_tracking_id(lvl, self.manager.LVL_PREFIX)
-                name = lvl.Name
-                
-                if (tracking_id in active_level_keys or name in active_level_keys) and name not in matched_level_names:
-                    matched_level_names.add(name)
-                else:
-                    # Rename immediately to free up name and flag for deletion
-                    try:
-                        lvl.Pinned = False
-                        lvl.Name = "ToDelete_level_{}".format(random.randint(10000, 99999))
-                    except Exception as ex:
-                        print("Warning: Could not rename duplicate level: {}".format(ex))
-                    to_delete_levels.append(lvl)
+            
+            # Safe Fail-Safe: Only perform level deletions if our compiled active set contains at least one level
+            if compiled_data.levels:
+                all_levels = DB.FilteredElementCollector(self.doc) \
+                    .OfClass(DB.Level) \
+                    .WhereElementIsNotElementType() \
+                    .ToElements()
+                    
+                for lvl in all_levels:
+                    if not lvl.IsValidObject:
+                        continue
+                    tracking_id = self.manager._get_tracking_id(lvl, self.manager.LVL_PREFIX)
+                    name = lvl.Name
+                    
+                    if (tracking_id in active_level_keys or name in active_level_keys) and name not in matched_level_names:
+                        matched_level_names.add(name)
+                    else:
+                        # Rename immediately to free up name and flag for deletion
+                        try:
+                            lvl.Pinned = False
+                            lvl.Name = "ToDelete_level_{}".format(random.randint(10000, 99999))
+                        except Exception as ex:
+                            print("Warning: Could not rename duplicate level: {}".format(ex))
+                        to_delete_levels.append(lvl)
+            else:
+                print("Warning: Compiled levels list is empty. Aborting levels cleanup to prevent complete model wipe.")
 
             matched_grid_names = set()
             to_delete_grids = []
-            all_grids = DB.FilteredElementCollector(self.doc) \
-                .OfClass(DB.Grid) \
-                .WhereElementIsNotElementType() \
-                .ToElements()
-                
-            for grd in all_grids:
-                if not grd.IsValidObject:
-                    continue
-                tracking_id = self.manager._get_tracking_id(grd, self.manager.GRD_PREFIX)
-                name = grd.Name
-                
-                if (tracking_id in active_grid_keys or name in active_grid_keys) and name not in matched_grid_names:
-                    matched_grid_names.add(name)
-                else:
-                    # Rename immediately to free up name and flag for deletion
-                    try:
-                        grd.Pinned = False
-                        grd.Name = "ToDelete_grid_{}".format(random.randint(10000, 99999))
-                    except Exception as ex:
-                        print("Warning: Could not rename duplicate grid: {}".format(ex))
-                    to_delete_grids.append(grd)
+            
+            # Safe Fail-Safe: Only perform grid deletions if our compiled active set contains at least one grid
+            if compiled_data.grids:
+                all_grids = DB.FilteredElementCollector(self.doc) \
+                    .OfClass(DB.Grid) \
+                    .WhereElementIsNotElementType() \
+                    .ToElements()
+                    
+                for grd in all_grids:
+                    if not grd.IsValidObject:
+                        continue
+                    tracking_id = self.manager._get_tracking_id(grd, self.manager.GRD_PREFIX)
+                    name = grd.Name
+                    
+                    if (tracking_id in active_grid_keys or name in active_grid_keys) and name not in matched_grid_names:
+                        matched_grid_names.add(name)
+                    else:
+                        # Rename immediately to free up name and flag for deletion
+                        try:
+                            grd.Pinned = False
+                            grd.Name = "ToDelete_grid_{}".format(random.randint(10000, 99999))
+                        except Exception as ex:
+                            print("Warning: Could not rename duplicate grid: {}".format(ex))
+                        to_delete_grids.append(grd)
+            else:
+                print("Warning: Compiled grids list is empty. Aborting grids cleanup to prevent complete model wipe.")
 
             # Pop the elements flagged for deletion out of active manager caches
             for lvl in to_delete_levels:
