@@ -21,9 +21,6 @@ class ConfigManager:
                         config["api_key"] = data["api_key"].strip()
                     if data.get("selected_model"):
                         model = data["selected_model"].strip()
-                        # Auto-upgrade old cached default model to the new preferred default
-                        if model == "gemini-2.5-flash":
-                            model = "gemini-flash-lite-latest"
                         config["selected_model"] = model
             except:
                 pass

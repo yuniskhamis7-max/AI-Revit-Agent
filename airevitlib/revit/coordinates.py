@@ -1,6 +1,7 @@
 # airevitlib/revit/coordinates.py
 import Autodesk.Revit.DB as DB
 
+
 class CoordinateUtility:
     """Calculates precise translations relative to the Project Base Point or Survey Point."""
     
