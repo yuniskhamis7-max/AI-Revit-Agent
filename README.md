@@ -56,6 +56,7 @@ airevitlib/
     forms.py                         WinForms dashboard and message dialogs
 docs/
   ARCHITECTURE.md                    runtime structure and design notes
+  DEBUG_HISTORY.md                   concise history of major debugging fixes
   INTENT_SCHEMA.md                   expected AI intent response shape
   PAYLOAD_SCHEMA.md                  sample payload contract
   PYREVIT_SETUP.md                   pyRevit installation and troubleshooting

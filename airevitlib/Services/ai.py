@@ -1,184 +1,115 @@
-# airevitlib/revit/elements.py
-import Autodesk.Revit.DB as DB
-import random
-from typing import Optional, Dict
-from core.models import LevelModel, GridModel
-from revit.coordinates import CoordinateUtility
+# airevitlib/services/ai.py
+import json
+import urllib.request
+import urllib.error
 
-class StructuralManager:
-    """Manages transactional database writes, element modifications, and deletions."""
-    
-    LVL_PREFIX = "AI_ID:LVL:"
-    GRD_PREFIX = "AI_ID:GRD:"
+class GeminiClient:
+    """Manages stateful multi-turn conversational validation loops."""
 
-    def __init__(self, doc: DB.Document, coord_utility: CoordinateUtility):
-        self.doc = doc
-        self.coord = coord_utility
-        self._levels = self._cache_existing_elements(DB.Level, self.LVL_PREFIX)
-        self._grids = self._cache_existing_elements(DB.Grid, self.GRD_PREFIX)
+    def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+        self.system_instruction = (
+            "You are an expert structural BIM/VDC systems architect. Your job is to process a multi-turn conversation, "
+            "determine the cumulative structural layout requested by the user, and output a validated delta plan "
+            "relative to the Revit model's actual, existing state.\n\n"
+            
+            "INPUT STRUCTURE:\n"
+            "You will receive a JSON payload containing:\n"
+            "1. 'conversation_history': A list of all past user and model messages in chronological order.\n"
+            "2. 'existing_model_state': A dictionary of levels and grids currently sitting in the real Revit model.\n\n"
+            
+            "CRITICAL GRID COUNT RULE (PREVENT FENCEPOST ERRORS):\n"
+            "1. If the user asks for 'N grids' or 'N grid lines', you MUST output exactly N elements in the list (e.g. '3 grids' -> 3 elements).\n"
+            "2. If the user asks for 'N bays', you MUST output exactly N+1 elements in the list (e.g. '3 bays' -> 4 elements).\n"
+            "3. Do not confuse 'grids' with 'bays'. If the user says 'create 3 grids', they want exactly 3 grid lines (e.g. 1, 2, 3), not 4.\n\n"
 
-    def get_existing_model_context(self) -> dict:
-        """Serializes current Revit model elements so the AI can run differential audits."""
-        return {
-            "levels": [
-                {"id": self._get_tracking_id(lvl, self.LVL_PREFIX) or lvl.Name, "name": lvl.Name, "elevation_m": lvl.Elevation / 3.280839895}
-                for lvl in self._levels.values()
-            ],
-            "grids": [
-                {
-                    "id": self._get_tracking_id(grd, self.GRD_PREFIX) or grd.Name, 
-                    "name": grd.Name,
-                    "axis": self._get_grid_properties(grd)[0],
-                    "position_m": self._get_grid_properties(grd)[1]
-                }
-                for grd in self._grids.values()
-            ]
+            "CRITICAL CONVERSATIONAL MEMORY RULE:\n"
+            "1. Read the entire 'conversation_history' from first to last to understand the context and the user's choices.\n"
+            "2. Compare the final consolidated user design intent against the actual 'existing_model_state'.\n"
+            "3. If the user confirms a deletion of an existing element, you MUST add that element's ID/Name to the deletion list.\n\n"
+
+            "CRITICAL DESIGN RULES:\n"
+            "1. LANGUAGE STANDARDIZATION: Keep all internal keys, structural IDs, and names in English "
+            "   (e.g., translate 'الأرضي' to 'Ground Floor'). Keep conversational messages friendly and in the user's language.\n\n"
+
+            "CONVERSATIONAL VALIDATION LOOP:\n"
+            "If the cumulative details are incomplete or contradictory, set 'is_valid' to false and write a clear, friendly "
+            "clarification message in 'clarification_message'. Only set 'is_valid' to true when the parameters are complete and unambiguous.\n\n"
+
+            "Output MUST be raw JSON matching this schema:\n"
+            "{\n"
+            '  "is_valid": bool,\n'
+            '  "clarification_message": "Friendly, conversational status update or clarification questions",\n'
+            '  "kpis": {\n'
+            '     "total_length_m": float or null,\n'
+            '     "total_width_m": float or null,\n'
+            '     "total_height_m": float or null,\n'
+            '     "footprint_area_sqm": float or null,\n'
+            '     "total_floors": int,\n'
+            '     "total_grids": int\n'
+            '  },\n'
+            '  "proposed_delta": {\n'
+            '     "levels": {\n'
+            '        "create": [ { "id": "lvl_b1", "name": "Basement 1", "elevation": -3.6, "create_floor_plan": true } ],\n'
+            '        "update": [ { "id": "lvl_1", "name": "Level 1", "elevation": 4.2 } ],\n'
+            '        "delete": [ "string_id_or_name" ]\n'
+            '     },\n'
+            '     "grids": {\n'
+            '        "create": [ { "id": "g_x_1", "name": "1", "axis": "X", "position": 0.0 } ],\n'
+            '        "update": [ { "id": "g_y_a", "name": "A", "axis": "Y", "position": 0.0 } ],\n'
+            '        "delete": [ "string_id_or_name" ]\n'
+            '     }\n'
+            '  }\n'
+            "}\n"
+        )
+
+    @staticmethod
+    def fetch_available_models(api_key: str) -> list:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        req = urllib.request.Request(url, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                res_body = response.read().decode("utf-8")
+                res_json = json.loads(res_body)
+                output_models = []
+                for m in res_json.get("models", []):
+                    if "generateContent" in m.get("supportedGenerationMethods", []):
+                        m_id = m["name"].replace("models/", "")
+                        if "vision" not in m_id and "bidi" not in m_id:
+                            output_models.append({"id": m_id, "name": m.get("displayName", m_id)})
+                return sorted(output_models, key=lambda x: x["id"])
+        except Exception as e:
+            raise RuntimeError(f"Could not query Gemini models: {e}")
+
+    def query_intent(self, chat_history: list, existing_context: dict) -> dict:
+        combined_payload = {
+            "conversation_history": chat_history,
+            "existing_model_state": existing_context
         }
-
-    def _get_grid_properties(self, grid: DB.Grid) -> tuple:
-        """Returns the axis ('X' or 'Y') and position (in meters) of a grid line relative to origin."""
-        try:
-            curve = grid.Curve
-            if curve and isinstance(curve, DB.Line):
-                start = curve.GetEndPoint(0)
-                end = curve.GetEndPoint(1)
-                direction = end - start
-                
-                # Check orientation relative to model space
-                if abs(direction.X) < 0.001:
-                    # Vertical grid line (spaced along X axis, so X coordinate is constant)
-                    rel_x = (start.X - self.coord.translation.X) / 3.280839895
-                    return "X", rel_x
-                else:
-                    # Horizontal grid line (spaced along Y axis, so Y coordinate is constant)
-                    rel_y = (start.Y - self.coord.translation.Y) / 3.280839895
-                    return "Y", rel_y
-        except Exception as ex:
-            print("Warning: Could not extract properties for grid {}: {}".format(grid.Name, ex))
-        return "X", 0.0
-
-    def _cache_existing_elements(self, db_class, tracking_prefix: str) -> Dict[str, DB.Element]:
-        cache = {}
-        elements = DB.FilteredElementCollector(self.doc).OfClass(db_class).WhereElementIsNotElementType().ToElements()
-        for elem in elements:
-            tracking_id = self._get_tracking_id(elem, tracking_prefix)
-            if tracking_id:
-                cache[tracking_id] = elem
-            else:
-                cache[elem.Name] = elem
-        return cache
-
-    def _get_tracking_id(self, elem: DB.Element, prefix: str) -> Optional[str]:
-        param = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-        if param and param.HasValue and param.AsString().startswith(prefix):
-            return param.AsString().replace(prefix, "")
-        return None
-
-    def _set_tracking_id(self, elem: DB.Element, prefix: str, target_id: str):
-        param = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-        if param:
-            param.Set(f"{prefix}{target_id}")
-
-    def element_exists(self, element_id: str, name: str, element_type: str) -> bool:
-        cache = self._levels if element_type == "level" else self._grids
-        return (element_id in cache) or (name in cache)
-
-    def get_existing_elevation(self, element_id: str, name: str) -> Optional[float]:
-        elem = self._levels.get(element_id) or self._levels.get(name)
-        return elem.Elevation if elem else None
-
-    def prepare_deletions(self, delete_ids: list, element_type: str) -> list:
-        """Temporarily renames all matching elements flagged for deletion and removes them from active caches."""
-        cache = self._levels if element_type == "level" else self._grids
-        elements_to_delete = []
         
-        # Gather all elements of this type in the document to safely clean up duplicates
-        db_class = DB.Level if element_type == "level" else DB.Grid
-        prefix = self.LVL_PREFIX if element_type == "level" else self.GRD_PREFIX
-        all_elements = DB.FilteredElementCollector(self.doc) \
-            .OfClass(db_class) \
-            .WhereElementIsNotElementType() \
-            .ToElements()
-
-        for elem in all_elements:
-            if not elem.IsValidObject:
-                continue
-            
-            tracking_id = self._get_tracking_id(elem, prefix)
-            name = elem.Name
-            
-            if (tracking_id in delete_ids) or (name in delete_ids):
-                try:
-                    elem.Pinned = False
-                    rand_suffix = random.randint(10000, 99999)
-                    temp_name = "ToDelete_{}_{}".format(element_type, rand_suffix)
-                    elem.Name = temp_name
-                except Exception as ex:
-                    print("Warning: Could not temporarily rename {} '{}': {}".format(element_type, name, ex))
-                
-                elements_to_delete.append(elem)
-                
-                # Pop out of the cache so we do not match or update them during the creation phase
-                if tracking_id in cache:
-                    cache.pop(tracking_id, None)
-                if name in cache:
-                    cache.pop(name, None)
-                    
-        return elements_to_delete
-
-    def execute_deletions(self, elements_to_delete: list):
-        """Safely unpins and deletes levels or grids from the model, printing brief warnings on protected elements."""
-        for elem in elements_to_delete:
-            if elem and elem.IsValidObject:
-                try:
-                    elem.Pinned = False
-                    self.doc.Delete(elem.Id)
-                except Exception as ex:
-                    # Clean up the console output by showing only the first line of the .NET exception
-                    err_msg = str(ex).split('\n')[0]
-                    print("Info: Element {} was kept (protected by Revit database). details: {}".format(elem.Id, err_msg))
-
-    def process_level(self, data: LevelModel) -> DB.Level:
-        p_xyz = self.coord.transform_point(0.0, 0.0, data.elevation, is_level=True)
-        target_z = p_xyz.Z
-
-        existing = self._levels.get(data.id) or self._levels.get(data.name)
-        if existing:
-            existing.Pinned = False
-            if abs(existing.Elevation - target_z) > 0.001:
-                existing.Elevation = target_z
-            if existing.Name != data.name:
-                existing.Name = data.name
-            level = existing
-        else:
-            level = DB.Level.Create(self.doc, target_z)
-            level.Name = data.name
-
-        self._set_tracking_id(level, self.LVL_PREFIX, data.id)
-        level.Pinned = data.is_pinned
-        return level
-
-    def process_grid(self, data: GridModel, base_elevation: float) -> DB.Grid:
-        existing = self._grids.get(data.id) or self._grids.get(data.name)
-        if existing:
-            try:
-                # We recreate grid lines to ensure their lengths always match our compiled extents
-                existing.Pinned = False
-                self.doc.Delete(existing.Id)
-            except Exception as err:
-                err_msg = str(err).split('\n')[0]
-                print("Warning: Failed to delete existing grid {} before recreating: {}".format(existing.Name, err_msg))
-
-        start_xyz = self.coord.transform_point(data.start.x, data.start.y, base_elevation)
-        end_xyz = self.coord.transform_point(data.end.x, data.end.y, base_elevation)
-
+        request_data = {
+            "contents": [{"parts": [{"text": json.dumps(combined_payload)}]}],
+            "generationConfig": {"responseMimeType": "application/json"},
+            "systemInstruction": {"parts": [{"text": self.system_instruction}]}
+        }
+        
+        json_bytes = json.dumps(request_data).encode("utf-8")
+        req = urllib.request.Request(
+            self.api_url, 
+            data=json_bytes, 
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
         try:
-            line = DB.Line.CreateBound(start_xyz, end_xyz)
-            grid = DB.Grid.Create(self.doc, line)
-            grid.Name = data.name
-            self._set_tracking_id(grid, self.GRD_PREFIX, data.id)
-            grid.Pinned = data.is_pinned
-            return grid
-        except Exception as err:
-            print(f"Failed to create grid {data.name}: {err}")
-            return None
+            with urllib.request.urlopen(req, timeout=30) as response:
+                res_body = response.read().decode("utf-8")
+                res_json = json.loads(res_body)
+                output_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                return json.loads(output_text)
+        except urllib.error.HTTPError as he:
+            err_content = he.read().decode("utf-8")
+            raise RuntimeError(f"API HTTP Error {he.code}: {err_content}")
+        except Exception as e:
+            raise RuntimeError(f"API Connection error: {e}")
