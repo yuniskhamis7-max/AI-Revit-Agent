@@ -9,7 +9,7 @@ from config import GEMINI_API_KEY, REVIT_BRIDGE_URL
 client = genai.Client()
 
 def get_revit_context() -> dict:
-    """Queries the live Revit model context from the running bridge."""
+    """Queries the dynamic context metadata directly from Revit."""
     print("[Revit Connection] Querying active project metadata...")
     payload = {"action": "get_context"}
     try:
@@ -26,22 +26,7 @@ def get_revit_context() -> dict:
         sys.exit(1)
 
 def place_family_instance(family_name: str, type_name: str, x: float, y: float, z: float, level_id: str) -> dict:
-    """
-    Places a specific family type instance inside the active Revit document 
-    at the defined absolute X, Y, Z coordinates and level constraint.
-    
-    Args:
-        family_name: The name of the family to place (e.g., "Desk").
-        type_name: The specific type name of the family (e.g., "60\" x 30\"").
-        x: The X coordinate in decimal feet relative to internal origin.
-        y: The Y coordinate in decimal feet relative to internal origin.
-        z: The Z coordinate in decimal feet relative to internal origin.
-        level_id: The unique ID string of the target constraint Level element.
-    """
-    print(f"\n[Tool Execution] Sending placement request to Revit Bridge...")
-    print(f" -> Family: {family_name} | Type: {type_name}")
-    print(f" -> Position: ({x}, {y}, {z}) | Level ID: {level_id}")
-
+    """Places a family symbol instance at the specified coordinates."""
     payload = {
         "action": "place_family",
         "parameters": {
@@ -51,28 +36,51 @@ def place_family_instance(family_name: str, type_name: str, x: float, y: float, 
             "level_id": level_id
         }
     }
-
     try:
         response = requests.post(REVIT_BRIDGE_URL, json=payload, timeout=30)
         return response.json()
     except requests.exceptions.RequestException as e:
-        return {"status": "error", "message": f"Bridge communication failure: {str(e)}"}
+         return {"status": "error", "message": f"Bridge communication failure: {str(e)}"}
+
+def create_sheet(sheet_number: str, sheet_name: str) -> dict:
+    """
+    Creates a new sheet layout (sheet plan view) in the active project.
+    
+    Args:
+        sheet_number: The unique identifier code for the sheet (e.g. 'A101', 'A102').
+        sheet_name: The descriptive title of the sheet layout (e.g. 'FIRST FLOOR PLAN').
+    """
+    print(f"\n[Tool Execution] Sending sheet creation request to Revit...")
+    print(f" -> Sheet: {sheet_number} - {sheet_name}")
+    payload = {
+        "action": "create_sheet",
+        "parameters": {
+            "sheet_number": sheet_number,
+            "sheet_name": sheet_name
+        }
+    }
+    try:
+        response = requests.post(REVIT_BRIDGE_URL, json=payload, timeout=30)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+         return {"status": "error", "message": f"Bridge communication failure: {str(e)}"}
 
 TOOL_MAP = {
-    "place_family_instance": place_family_instance
+    "place_family_instance": place_family_instance,
+    "create_sheet": create_sheet
 }
 
 def run_agent_loop(user_prompt: str, project_context: str):
     print(f"\n[Agent Initialization] Processing user request...")
     
-    tools = [place_family_instance]
+    # Expose the tools directly to the Gemini Agent model
+    tools = [place_family_instance, create_sheet]
     
     config = types.GenerateContentConfig(
         system_instruction=(
             "You are an active AI BIM design assistant operating inside Autodesk Revit. "
             "You have direct access to execute architectural layout modifications utilizing your tools. "
-            "Examine the project metadata context closely, then call your tools to fulfill the user request. "
-            "Always match the user-requested family types and levels with the available elements in the project context."
+            "Examine the project metadata context closely, then call your tools to fulfill the user request."
         ),
         tools=tools,
         temperature=0.0
@@ -115,15 +123,14 @@ def run_agent_loop(user_prompt: str, project_context: str):
     return response.text
 
 if __name__ == "__main__":
-    # 1. Pull dynamic metadata directly from Revit
+    # Get live context from Revit
     real_context = get_revit_context()
     
     print("\nSuccessfully loaded live model context!")
     print(f" -> Current Document: {real_context.get('document_title')}")
     print(f" -> Found {len(real_context.get('levels', []))} level(s)")
-    print(f" -> Found {len(real_context.get('families', {}))} family definitions")
 
-    # Prompt user for natural language input
-    user_request = "Place a standard 60\" x 30\" Desk on Level 1 at coordinates X=10, Y=5, Z=0."
+    # Execute dynamic sheet layout query
+    user_request = "Create a new sheet layout for the architectural division. Code it A102 and title it LOBBY ELEVATIONS."
     
     run_agent_loop(user_prompt=user_request, project_context=json.dumps(real_context))
