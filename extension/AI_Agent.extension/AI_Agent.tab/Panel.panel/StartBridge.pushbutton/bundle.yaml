@@ -1,0 +1,3 @@
+layout:
+  title: "Start\nBridge"
+  tooltip: "Launches the safe, thread-controlled local HTTP bridge server for agent communication."
