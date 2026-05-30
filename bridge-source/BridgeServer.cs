@@ -3,11 +3,8 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
-using System.Text.Json;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using Autodesk.Revit.UI;
-using Autodesk.Revit.DB;
 
 namespace RevitAgentBridge
 {
@@ -35,6 +32,9 @@ namespace RevitAgentBridge
     {
         private readonly ConcurrentQueue<AgentTask> _taskQueue = new ConcurrentQueue<AgentTask>();
 
+        // This delegate holds our native Python callback function
+        public Func<string, string> PythonExecutor { get; set; }
+
         public void EnqueueTask(AgentTask task)
         {
             if (task != null)
@@ -45,150 +45,23 @@ namespace RevitAgentBridge
 
         public void Execute(UIApplication app)
         {
-            if (app?.ActiveUIDocument == null) return;
-
-            Document doc = app.ActiveUIDocument.Document;
-
             while (_taskQueue.TryDequeue(out AgentTask task))
             {
                 try
                 {
-                    using (JsonDocument document = JsonDocument.Parse(task.RequestJson))
+                    if (PythonExecutor != null)
                     {
-                        JsonElement root = document.RootElement;
-                        string action = root.GetProperty("action").GetString();
-
-                        // ACTION 1: Get Active Document Context (Dynamic Levels & Families)
-                        if (action == "get_context")
-                        {
-                            var levelsList = new List<object>();
-                            var familiesDict = new Dictionary<string, List<string>>();
-
-                            // Collect Levels
-                            var levelCollector = new FilteredElementCollector(doc).OfClass(typeof(Level));
-                            foreach (Level lvl in levelCollector)
-                            {
-                                levelsList.Add(new
-                                {
-                                    name = lvl.Name,
-                                    id = lvl.UniqueId,
-                                    elevation = lvl.Elevation // in decimal feet
-                                });
-                            }
-
-                            // Collect Loaded Family Symbols
-                            var symbolCollector = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol));
-                            foreach (FamilySymbol symbol in symbolCollector)
-                            {
-                                string famName = symbol.Family.Name;
-                                string typeName = symbol.Name;
-
-                                if (!familiesDict.ContainsKey(famName))
-                                {
-                                    familiesDict[famName] = new List<string>();
-                                }
-                                if (!familiesDict[famName].Contains(typeName))
-                                {
-                                    familiesDict[famName].Add(typeName);
-                                }
-                            }
-
-                            var contextObj = new
-                            {
-                                status = "success",
-                                document_title = doc.Title,
-                                levels = levelsList,
-                                families = familiesDict
-                            };
-
-                            task.ResultJson = JsonSerializer.Serialize(contextObj);
-                        }
-                        // ACTION 2: Real physical Family Placement inside Transaction
-                        else if (action == "place_family")
-                        {
-                            JsonElement parameters = root.GetProperty("parameters");
-                            string familyName = parameters.GetProperty("family_name").GetString();
-                            string typeName = parameters.GetProperty("type_name").GetString();
-                            string levelId = parameters.GetProperty("level_id").GetString();
-
-                            JsonElement coordinates = parameters.GetProperty("coordinates");
-                            double x = coordinates.GetProperty("x").GetDouble();
-                            double y = coordinates.GetProperty("y").GetDouble();
-                            double z = coordinates.GetProperty("z").GetDouble();
-
-                            // 1. Resolve Target Level
-                            Element levelElement = doc.GetElement(levelId);
-                            Level level = levelElement as Level;
-                            if (level == null)
-                            {
-                                throw new ArgumentException($"The level ID '{levelId}' is invalid or does not exist.");
-                            }
-
-                            // 2. Resolve Target Family Symbol
-                            FamilySymbol targetSymbol = null;
-                            var symbolCollector = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol));
-                            foreach (FamilySymbol s in symbolCollector)
-                            {
-                                if (s.Family.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase) &&
-                                    s.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    targetSymbol = s;
-                                    break;
-                                }
-                            }
-
-                            if (targetSymbol == null)
-                            {
-                                throw new InvalidOperationException($"The family symbol '{familyName}' with type '{typeName}' is not loaded in this project.");
-                            }
-
-                            string placedElementId = string.Empty;
-
-                            // 3. Open a Revit Transaction and execute placement
-                            using (Transaction trans = new Transaction(doc, "AI Agent - Place Family"))
-                            {
-                                trans.Start();
-
-                                // Symbol must be activated before placement to prevent crash
-                                if (!targetSymbol.IsActive)
-                                {
-                                    targetSymbol.Activate();
-                                    doc.Regenerate();
-                                }
-
-                                XYZ insertionPoint = new XYZ(x, y, z);
-                                
-                                FamilyInstance instance = doc.Create.NewFamilyInstance(
-                                    insertionPoint,
-                                    targetSymbol,
-                                    level,
-                                    Autodesk.Revit.DB.Structure.StructuralType.NonStructural
-                                );
-
-                                trans.Commit();
-                                placedElementId = instance.UniqueId;
-                            }
-
-                            var placementResponse = new
-                            {
-                                status = "success",
-                                message = "Successfully placed element in Revit model.",
-                                element_id = placedElementId
-                            };
-
-                            task.ResultJson = JsonSerializer.Serialize(placementResponse);
-                        }
-                        else
-                        {
-                            var errorObj = new { status = "error", message = $"Action '{action}' is not supported." };
-                            task.ResultJson = JsonSerializer.Serialize(errorObj);
-                        }
+                        // Safely execute the Python handler directly on Revit's main thread
+                        task.ResultJson = PythonExecutor(task.RequestJson);
+                    }
+                    else
+                    {
+                        task.ResultJson = "{\"status\":\"error\",\"message\":\"Python execution delegate is not registered inside Revit AppDomain.\"}";
                     }
                 }
                 catch (Exception ex)
                 {
-                    var exceptionObj = new { status = "error", message = $"Placement error inside Revit: {ex.Message}" };
-                    task.ResultJson = JsonSerializer.Serialize(exceptionObj);
+                    task.ResultJson = $"{{\"status\":\"error\",\"message\":\"C# Bridge execution crash: {ex.Message}\"}}";
                 }
                 finally
                 {
@@ -267,7 +140,7 @@ namespace RevitAgentBridge
                 }
                 catch (Exception)
                 {
-                    // Safeguard execution thread
+                    // Prevent thread crash
                 }
             }
         }
