@@ -5,12 +5,11 @@ import sys
 
 # Reference internal Revit API namespaces
 from Autodesk.Revit.DB import *
-from Autodesk.Revit.UI import ExternalEvent
+from Autodesk.Revit.UI import ExternalEvent, TaskDialog
 
 current_dir = os.path.dirname(__file__)
 dll_full_path = os.path.join(current_dir, "RevitAgentBridge.dll")
 
-# Safely resolve binary dependencies
 if os.path.exists(dll_full_path):
     try:
         clr.AddReferenceToFileAndPath(dll_full_path)
@@ -37,7 +36,7 @@ def python_execution_router(request_json_string):
     )
     
     # -----------------------------------------------------------------
-    # NESTED CLOSURE TOOLS (With Defensive Null Checks)
+    # NESTED CLOSURE TOOLS
     # -----------------------------------------------------------------
     
     def tool_get_context(doc, parameters):
@@ -57,11 +56,10 @@ def python_execution_router(request_json_string):
             except Exception:
                 continue
 
-        # Safe Family Symbol Extraction (Skip system/null elements)
+        # Safe Family Symbol Extraction
         symbol_collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
         for symbol in symbol_collector:
             try:
-                # Ensure the symbol and its parent Family object are not null
                 if symbol and symbol.Family:
                     fam_name = symbol.Family.Name
                     type_name = symbol.Name
@@ -72,7 +70,6 @@ def python_execution_router(request_json_string):
                         if type_name and type_name not in families_dict[fam_name]:
                             families_dict[fam_name].append(type_name)
             except Exception:
-                # Safely skip elements that throw exceptions during property reads
                 continue
 
         return {
@@ -139,7 +136,9 @@ def python_execution_router(request_json_string):
             end_point = XYZ(end.get("x", 0.0), end.get("y", 0.0), 0.0)
             
             grid_line = Line.CreateBound(start_point, end_point)
-            new_grid = Grid.CreateGrid(doc, grid_line)
+            
+            new_grid = Grid.Create(doc, grid_line)
+            
             if grid_name:
                 new_grid.Name = grid_name
             trans.Commit()
@@ -159,7 +158,6 @@ def python_execution_router(request_json_string):
         title_block_symbol = None
         for symbol in collector:
             try:
-                # Ensure category is not null before checking category name
                 if symbol and symbol.Category and symbol.Category.Name == "Title Blocks":
                     title_block_symbol = symbol
                     break
@@ -184,8 +182,15 @@ def python_execution_router(request_json_string):
         }
 
     # -----------------------------------------------------------------
-    # ROUTER EXECUTION DISPATCH
+    # STABLE EXPLICIT DISPATCH REGISTRY
     # -----------------------------------------------------------------
+    tools_registry = {
+        "get_context": tool_get_context,
+        "place_family": tool_place_family,
+        "create_grid": tool_create_grid,
+        "create_sheet": tool_create_sheet
+    }
+
     try:
         payload = json.loads(request_json_string)
         action = payload.get("action")
@@ -193,16 +198,16 @@ def python_execution_router(request_json_string):
 
         doc = __revit__.ActiveUIDocument.Document
 
-        if action == "get_context":
-            result = tool_get_context(doc, parameters)
-        elif action == "place_family":
-            result = tool_place_family(doc, parameters)
-        elif action == "create_grid":
-            result = tool_create_grid(doc, parameters)
-        elif action == "create_sheet":
-            result = tool_create_sheet(doc, parameters)
+        # Direct dictionary retrieval
+        tool_function = tools_registry.get(action)
+
+        if tool_function:
+            result = tool_function(doc, parameters)
         else:
-            result = {"status": "error", "message": "Action '{}' has no python implementation.".format(action)}
+            result = {
+                "status": "error", 
+                "message": "Action '{}' has no registered implementation inside Revit.".format(action)
+            }
 
         return json.dumps(result)
         
@@ -210,8 +215,30 @@ def python_execution_router(request_json_string):
         return json.dumps({"status": "error", "message": "Fatal exception in Python: " + str(ex)})
 
 # =====================================================================
-# EVENT REGISTRATION & TOGGLE
+# EVENT REGISTRATION & TOGGLE (WITH ROBUST INDICATORS)
 # =====================================================================
+
+from pyrevit import script
+
+def update_button_ui(is_active):
+    """
+    Updates the visual title of the Ribbon Button using safe, plain-text labels.
+    Also triggers an explicit, native Revit TaskDialog confirmation.
+    """
+    try:
+        button = script.get_button()
+        if is_active:
+            button.title = "Stop Bridge\n[ACTIVE]"
+            TaskDialog.Show("AI Agent Bridge", "Bridge Server is now ACTIVE and listening on port 8080.")
+        else:
+            button.title = "Start Bridge\n[OFF]"
+            TaskDialog.Show("AI Agent Bridge", "Bridge Server has been STOPPED.")
+    except Exception:
+        # Fallback dialog if the active pyRevit button reference is lost
+        if is_active:
+            TaskDialog.Show("AI Agent Bridge", "Bridge Server is now ACTIVE and listening on port 8080.")
+        else:
+            TaskDialog.Show("AI Agent Bridge", "Bridge Server has been STOPPED.")
 
 def stop_active_bridge():
     try:
@@ -222,13 +249,13 @@ def stop_active_bridge():
     except Exception:
          pass
 
+# Toggle execution logic
 if BridgeRegistry.ActiveServer is not None:
     stop_active_bridge()
+    update_button_ui(False)
 else:
     try:
         handler = AgentExternalEventHandler()
-        
-        # BIND THE PYTHON ROUTER DIRECTLY TO THE C# EVENT HANDLER
         handler.PythonExecutor = python_execution_router
 
         external_event = ExternalEvent.Create(handler)
@@ -238,5 +265,8 @@ else:
 
         BridgeRegistry.ActiveServer = bridge_server
         BridgeRegistry.ActiveEvent = external_event
+        
+        # Successfully started
+        update_button_ui(True)
     except Exception:
-        pass
+        update_button_ui(False)
