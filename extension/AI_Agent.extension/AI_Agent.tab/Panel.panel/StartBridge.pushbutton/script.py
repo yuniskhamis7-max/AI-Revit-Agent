@@ -99,8 +99,8 @@ def python_execution_router(request_json_string):
         symbol_collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
         for symbol in symbol_collector:
             try:
-                if symbol and symbol.Family:
-                    fam_name = symbol.Family.Name
+                if symbol:
+                    fam_name = symbol.FamilyName
                     type_name = symbol.Name
                     if fam_name:
                         if fam_name not in families_dict:
@@ -118,7 +118,182 @@ def python_execution_router(request_json_string):
         }
 
     # -----------------------------------------------------------------
-    # REGISTERED TOOLS (Exposed to Gemini via GET /tools/)
+    # REGISTERED FETCH TOOLS (Read-only context queries for Gemini)
+    # -----------------------------------------------------------------
+
+    @register_tool(
+        name="fetch_project_info",
+        description=(
+            "Fetches basic identification metadata about the active Revit "
+            "project. Returns the document title and file path. Use this "
+            "for lightweight project identification."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    )
+    def tool_fetch_project_info(doc, parameters):
+        file_path = ""
+        try:
+            if doc.PathName:
+                file_path = doc.PathName
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "document_title": doc.Title or "Untitled",
+            "file_path": file_path
+        }
+
+    @register_tool(
+        name="fetch_levels",
+        description=(
+            "Fetches all levels in the active Revit project. Returns each "
+            "level's name, UniqueId, and elevation in feet. Use this before "
+            "placing family instances or when you need elevation context."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    )
+    def tool_fetch_levels(doc, parameters):
+        levels_list = []
+        level_collector = FilteredElementCollector(doc).OfClass(Level)
+        for lvl in level_collector:
+            try:
+                if lvl:
+                    levels_list.append({
+                        "name": lvl.Name or "Unnamed Level",
+                        "id": lvl.UniqueId,
+                        "elevation": lvl.Elevation
+                    })
+            except Exception:
+                continue
+
+        return {
+            "status": "success",
+            "levels": levels_list
+        }
+
+    @register_tool(
+        name="fetch_grids",
+        description=(
+            "Fetches all existing reference gridlines in the active Revit "
+            "project. Returns each grid's name, UniqueId, and the start/end "
+            "point coordinates of its curve. Use this before creating new "
+            "grids to check names and determine spacing."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    )
+    def tool_fetch_grids(doc, parameters):
+        grids_list = []
+        grid_collector = FilteredElementCollector(doc).OfClass(Grid)
+        for grid in grid_collector:
+            try:
+                if grid:
+                    curve = grid.Curve
+                    start_pt = curve.GetEndPoint(0)
+                    end_pt = curve.GetEndPoint(1)
+                    grids_list.append({
+                        "name": grid.Name or "Unnamed Grid",
+                        "id": grid.UniqueId,
+                        "start_point": {
+                            "x": start_pt.X,
+                            "y": start_pt.Y,
+                            "z": start_pt.Z
+                        },
+                        "end_point": {
+                            "x": end_pt.X,
+                            "y": end_pt.Y,
+                            "z": end_pt.Z
+                        }
+                    })
+            except Exception:
+                continue
+
+        return {
+            "status": "success",
+            "grids": grids_list
+        }
+
+    @register_tool(
+        name="fetch_families",
+        description=(
+            "Fetches all loaded family symbols (types) in the active Revit "
+            "project. Returns a dictionary mapping family names to lists of "
+            "their available type names. Use this before placing a family "
+            "instance to verify the family and type are loaded."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    )
+    def tool_fetch_families(doc, parameters):
+        families_dict = {}
+        symbol_collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
+        for symbol in symbol_collector:
+            try:
+                if symbol:
+                    fam_name = symbol.FamilyName
+                    type_name = symbol.Name
+                    if fam_name:
+                        if fam_name not in families_dict:
+                            families_dict[fam_name] = []
+                        if type_name and type_name not in families_dict[fam_name]:
+                            families_dict[fam_name].append(type_name)
+            except Exception:
+                continue
+
+        return {
+            "status": "success",
+            "families": families_dict
+        }
+
+    @register_tool(
+        name="fetch_sheets",
+        description=(
+            "Fetches all existing drawing sheets in the active Revit project. "
+            "Returns each sheet's number, name, and UniqueId. Use this before "
+            "creating a new sheet to avoid duplicate sheet numbers."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    )
+    def tool_fetch_sheets(doc, parameters):
+        sheets_list = []
+        sheet_collector = FilteredElementCollector(doc).OfClass(ViewSheet)
+        for sheet in sheet_collector:
+            try:
+                if sheet:
+                    sheets_list.append({
+                        "number": sheet.SheetNumber or "",
+                        "name": sheet.Name or "Unnamed Sheet",
+                        "id": sheet.UniqueId
+                    })
+            except Exception:
+                continue
+
+        return {
+            "status": "success",
+            "sheets": sheets_list
+        }
+
+    # -----------------------------------------------------------------
+    # REGISTERED ACTION TOOLS (Exposed to Gemini via GET /tools/)
     # -----------------------------------------------------------------
 
     @register_tool(
@@ -174,8 +349,8 @@ def python_execution_router(request_json_string):
         collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
         for s in collector:
             try:
-                if s and s.Family:
-                    if (s.Family.Name.lower() == family_name.lower() and
+                if s:
+                    if (s.FamilyName.lower() == family_name.lower() and
                             s.Name.lower() == type_name.lower()):
                         target_symbol = s
                         break
