@@ -3,7 +3,6 @@ import clr
 import os
 import sys
 
-# Reference internal Revit API namespaces
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import ExternalEvent, TaskDialog
 
@@ -13,7 +12,7 @@ dll_full_path = os.path.join(current_dir, "RevitAgentBridge.dll")
 if os.path.exists(dll_full_path):
     try:
         clr.AddReferenceToFileAndPath(dll_full_path)
-    except Exception as ex:
+    except Exception:
         sys.exit()
 else:
     sys.exit()
@@ -21,29 +20,70 @@ else:
 from RevitAgentBridge import AgentExternalEventHandler, BridgeServer, BridgeRegistry
 
 # =====================================================================
-# DYNAMIC PYTHON EXECUTION ROUTER (WITH CLOSURE PROTECTION)
+# DYNAMIC PYTHON EXECUTION ROUTER
+#
+# CRITICAL (IronPython GC rule): ALL registry state, helper functions,
+# and tool implementations MUST live inside this closure. IronPython
+# garbage-collects module-level globals after the script finishes.
+# When C# calls PythonExecutor later, only the closure scope survives.
 # =====================================================================
 
 def python_execution_router(request_json_string):
     """
-    Receives JSON payloads directly from C# on Revit's main thread.
-    Contains all nested tools inside its closure scope to prevent garbage collection.
+    Receives JSON payloads from C# on Revit's main thread.
+    All state is kept inside this closure to survive IronPython GC.
     """
     import json
     from Autodesk.Revit.DB import (
-        FilteredElementCollector, Level, FamilySymbol, 
+        FilteredElementCollector, Level, FamilySymbol,
         Transaction, XYZ, Line, Grid, ViewSheet, Structure
     )
-    
+
     # -----------------------------------------------------------------
-    # NESTED CLOSURE TOOLS
+    # IN-CLOSURE TOOL REGISTRY
+    # Rebuilt on every call (fast), always consistent, GC-safe.
     # -----------------------------------------------------------------
-    
+    tool_registry  = []   # List of JSON schema dicts → served via GET /tools/
+    tool_functions = {}   # Maps action name → tool function
+
+    def register_tool(name, description, parameters):
+        """
+        IronPython 2.7-compatible decorator factory.
+        Registers a tool's JSON schema and its implementation.
+
+        Usage:
+            @register_tool(
+                name="my_action",
+                description="Does something useful.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "param1": {"type": "string", "description": "..."}
+                    },
+                    "required": ["param1"]
+                }
+            )
+            def tool_my_action(doc, parameters):
+                ...
+        """
+        def decorator(fn):
+            tool_registry.append({
+                "name": name,
+                "description": description,
+                "parameters": parameters
+            })
+            tool_functions[name] = fn
+            return fn
+        return decorator
+
+    # -----------------------------------------------------------------
+    # SYSTEM TOOL: get_context (not exposed to Gemini, called directly)
+    # -----------------------------------------------------------------
+
     def tool_get_context(doc, parameters):
         levels_list = []
         families_dict = {}
 
-        # Safe Level Extraction
         level_collector = FilteredElementCollector(doc).OfClass(Level)
         for lvl in level_collector:
             try:
@@ -56,14 +96,12 @@ def python_execution_router(request_json_string):
             except Exception:
                 continue
 
-        # Safe Family Symbol Extraction
         symbol_collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
         for symbol in symbol_collector:
             try:
                 if symbol and symbol.Family:
                     fam_name = symbol.Family.Name
                     type_name = symbol.Name
-                    
                     if fam_name:
                         if fam_name not in families_dict:
                             families_dict[fam_name] = []
@@ -74,16 +112,59 @@ def python_execution_router(request_json_string):
 
         return {
             "status": "success",
-            "document_title": doc.Title or "test",
+            "document_title": doc.Title or "Untitled",
             "levels": levels_list,
             "families": families_dict
         }
 
+    # -----------------------------------------------------------------
+    # REGISTERED TOOLS (Exposed to Gemini via GET /tools/)
+    # -----------------------------------------------------------------
+
+    @register_tool(
+        name="place_family",
+        description=(
+            "Places a loaded family symbol instance at a specified 3D "
+            "coordinate on a given level in the active Revit project."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "family_name": {
+                    "type": "string",
+                    "description": "The exact name of the family (e.g. 'Single-Flush')."
+                },
+                "type_name": {
+                    "type": "string",
+                    "description": "The type name within the family (e.g. '36\" x 84\"')."
+                },
+                "level_id": {
+                    "type": "string",
+                    "description": "The UniqueId of the host level element."
+                },
+                "x": {
+                    "type": "number",
+                    "description": "X coordinate in feet."
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Y coordinate in feet."
+                },
+                "z": {
+                    "type": "number",
+                    "description": "Z coordinate in feet."
+                }
+            },
+            "required": ["family_name", "type_name", "level_id", "x", "y", "z"]
+        }
+    )
     def tool_place_family(doc, parameters):
         family_name = parameters.get("family_name")
-        type_name = parameters.get("type_name")
-        level_id = parameters.get("level_id")
-        coords = parameters.get("coordinates", {"x": 0.0, "y": 0.0, "z": 0.0})
+        type_name   = parameters.get("type_name")
+        level_id    = parameters.get("level_id")
+        x = parameters.get("x", 0.0)
+        y = parameters.get("y", 0.0)
+        z = parameters.get("z", 0.0)
 
         level_el = doc.GetElement(level_id)
         if not level_el or not isinstance(level_el, Level):
@@ -94,26 +175,27 @@ def python_execution_router(request_json_string):
         for s in collector:
             try:
                 if s and s.Family:
-                    if s.Family.Name.lower() == family_name.lower() and s.Name.lower() == type_name.lower():
+                    if (s.Family.Name.lower() == family_name.lower() and
+                            s.Name.lower() == type_name.lower()):
                         target_symbol = s
                         break
             except Exception:
                 continue
 
         if not target_symbol:
-            return {"status": "error", "message": "Symbol '{}-{}' is not loaded.".format(family_name, type_name)}
+            return {
+                "status": "error",
+                "message": "Symbol '{}-{}' is not loaded.".format(family_name, type_name)
+            }
 
         with Transaction(doc, "AI Agent - Place Family") as trans:
             trans.Start()
             if not target_symbol.IsActive:
                 target_symbol.Activate()
                 doc.Regenerate()
-            
-            point = XYZ(coords.get("x", 0.0), coords.get("y", 0.0), coords.get("z", 0.0))
+            point    = XYZ(float(x), float(y), float(z))
             instance = doc.Create.NewFamilyInstance(
-                point, 
-                target_symbol, 
-                level_el, 
+                point, target_symbol, level_el,
                 Structure.StructuralType.NonStructural
             )
             trans.Commit()
@@ -125,20 +207,52 @@ def python_execution_router(request_json_string):
             "element_id": placed_id
         }
 
+    @register_tool(
+        name="create_grid",
+        description=(
+            "Creates a linear reference gridline between two XY points "
+            "in the active Revit project."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Display name of the grid (e.g. 'Grid A', 'Grid 1')."
+                },
+                "start_x": {
+                    "type": "number",
+                    "description": "Starting X coordinate in feet."
+                },
+                "start_y": {
+                    "type": "number",
+                    "description": "Starting Y coordinate in feet."
+                },
+                "end_x": {
+                    "type": "number",
+                    "description": "Ending X coordinate in feet."
+                },
+                "end_y": {
+                    "type": "number",
+                    "description": "Ending Y coordinate in feet."
+                }
+            },
+            "required": ["name", "start_x", "start_y", "end_x", "end_y"]
+        }
+    )
     def tool_create_grid(doc, parameters):
         grid_name = parameters.get("name")
-        start = parameters.get("start_point", {"x": 0.0, "y": 0.0})
-        end = parameters.get("end_point", {"x": 0.0, "y": 0.0})
+        start_x   = parameters.get("start_x", 0.0)
+        start_y   = parameters.get("start_y", 0.0)
+        end_x     = parameters.get("end_x", 0.0)
+        end_y     = parameters.get("end_y", 0.0)
 
         with Transaction(doc, "AI Agent - Create Grid") as trans:
             trans.Start()
-            start_point = XYZ(start.get("x", 0.0), start.get("y", 0.0), 0.0)
-            end_point = XYZ(end.get("x", 0.0), end.get("y", 0.0), 0.0)
-            
-            grid_line = Line.CreateBound(start_point, end_point)
-            
-            new_grid = Grid.Create(doc, grid_line)
-            
+            start_point = XYZ(float(start_x), float(start_y), 0.0)
+            end_point   = XYZ(float(end_x), float(end_y), 0.0)
+            grid_line   = Line.CreateBound(start_point, end_point)
+            new_grid    = Grid.Create(doc, grid_line)
             if grid_name:
                 new_grid.Name = grid_name
             trans.Commit()
@@ -146,13 +260,34 @@ def python_execution_router(request_json_string):
 
         return {
             "status": "success",
-            "message": "Successfully created Grid '{}'".format(grid_name),
+            "message": "Successfully created Grid '{}'.".format(grid_name),
             "element_id": grid_id
         }
 
+    @register_tool(
+        name="create_sheet",
+        description=(
+            "Creates a new drawing sheet in the active Revit project using "
+            "the first available Title Block family."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "sheet_number": {
+                    "type": "string",
+                    "description": "Unique sheet identifier code (e.g. 'A101', 'A102')."
+                },
+                "sheet_name": {
+                    "type": "string",
+                    "description": "Descriptive title of the sheet (e.g. 'FIRST FLOOR PLAN')."
+                }
+            },
+            "required": ["sheet_number", "sheet_name"]
+        }
+    )
     def tool_create_sheet(doc, parameters):
         sheet_number = parameters.get("sheet_number", "A101")
-        sheet_name = parameters.get("sheet_name", "UNNAMED SHEET")
+        sheet_name   = parameters.get("sheet_name", "UNNAMED SHEET")
 
         collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
         title_block_symbol = None
@@ -177,68 +312,72 @@ def python_execution_router(request_json_string):
 
         return {
             "status": "success",
-            "message": "Successfully created sheet {} - {}".format(sheet_number, sheet_name),
+            "message": "Successfully created sheet {} - {}.".format(sheet_number, sheet_name),
             "element_id": sheet_id
         }
 
     # -----------------------------------------------------------------
-    # STABLE EXPLICIT DISPATCH REGISTRY
+    # DISPATCH ROUTER
     # -----------------------------------------------------------------
-    tools_registry = {
-        "get_context": tool_get_context,
-        "place_family": tool_place_family,
-        "create_grid": tool_create_grid,
-        "create_sheet": tool_create_sheet
-    }
-
     try:
-        payload = json.loads(request_json_string)
-        action = payload.get("action")
+        payload    = json.loads(request_json_string)
+        action     = payload.get("action")
         parameters = payload.get("parameters", {})
 
-        doc = __revit__.ActiveUIDocument.Document
+        # Special: return the live tool registry (no Revit DB access needed)
+        if action == "get_tools":
+            return json.dumps({"status": "success", "tools": tool_registry})
 
-        # Direct dictionary retrieval
-        tool_function = tools_registry.get(action)
+        # Special: query Revit project metadata
+        if action == "get_context":
+            doc = __revit__.ActiveUIDocument.Document
+            return json.dumps(tool_get_context(doc, parameters))
 
-        if tool_function:
-            result = tool_function(doc, parameters)
+        # Registered tool dispatch
+        doc     = __revit__.ActiveUIDocument.Document
+        tool_fn = tool_functions.get(action)
+
+        if tool_fn:
+            result = tool_fn(doc, parameters)
         else:
             result = {
-                "status": "error", 
+                "status": "error",
                 "message": "Action '{}' has no registered implementation inside Revit.".format(action)
             }
 
         return json.dumps(result)
-        
+
     except Exception as ex:
         return json.dumps({"status": "error", "message": "Fatal exception in Python: " + str(ex)})
 
+
 # =====================================================================
-# EVENT REGISTRATION & TOGGLE (WITH ROBUST INDICATORS)
+# EVENT REGISTRATION & TOGGLE
 # =====================================================================
 
-from pyrevit import script
+from pyrevit import script as pvscript
 
 def update_button_ui(is_active):
     """
-    Updates the visual title of the Ribbon Button using safe, plain-text labels.
-    Also triggers an explicit, native Revit TaskDialog confirmation.
+    Updates the Ribbon button title and shows a confirmation dialog.
+    pyRevit exposes the live button reference via script.get_button().
+    The correct property for runtime title updates is ui_title.
     """
     try:
-        button = script.get_button()
-        if is_active:
-            button.title = "Stop Bridge\n[ACTIVE]"
-            TaskDialog.Show("AI Agent Bridge", "Bridge Server is now ACTIVE and listening on port 8080.")
-        else:
-            button.title = "Start Bridge\n[OFF]"
-            TaskDialog.Show("AI Agent Bridge", "Bridge Server has been STOPPED.")
+        button = pvscript.get_button()
+        if button is not None:
+            if is_active:
+                button.ui_title = "Stop Bridge\n[ACTIVE]"
+            else:
+                button.ui_title = "Start Bridge\n[OFF]"
     except Exception:
-        # Fallback dialog if the active pyRevit button reference is lost
-        if is_active:
-            TaskDialog.Show("AI Agent Bridge", "Bridge Server is now ACTIVE and listening on port 8080.")
-        else:
-            TaskDialog.Show("AI Agent Bridge", "Bridge Server has been STOPPED.")
+        pass  # Title update is best-effort; dialog feedback is the reliable path
+
+    if is_active:
+        TaskDialog.Show("AI Agent Bridge", "Bridge Server is now ACTIVE and listening on port 8080.")
+    else:
+        TaskDialog.Show("AI Agent Bridge", "Bridge Server has been STOPPED.")
+
 
 def stop_active_bridge():
     try:
@@ -247,7 +386,8 @@ def stop_active_bridge():
             active_server.Stop()
             BridgeRegistry.ActiveServer = None
     except Exception:
-         pass
+        pass
+
 
 # Toggle execution logic
 if BridgeRegistry.ActiveServer is not None:
@@ -264,9 +404,8 @@ else:
         bridge_server.Start(8080)
 
         BridgeRegistry.ActiveServer = bridge_server
-        BridgeRegistry.ActiveEvent = external_event
-        
-        # Successfully started
+        BridgeRegistry.ActiveEvent  = external_event
+
         update_button_ui(True)
-    except Exception:
-        update_button_ui(False)
+    except Exception as start_ex:
+        TaskDialog.Show("AI Agent Bridge", "Failed to start Bridge Server:\n" + str(start_ex))

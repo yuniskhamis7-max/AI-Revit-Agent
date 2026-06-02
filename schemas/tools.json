@@ -1,0 +1,100 @@
+[
+  {
+    "description": "Places a loaded family symbol instance at a specified 3D coordinate on a given level in the active Revit project.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "family_name",
+        "type_name",
+        "level_id",
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "level_id": {
+          "description": "The UniqueId of the host level element.",
+          "type": "string"
+        },
+        "type_name": {
+          "description": "The type name within the family (e.g. '36\" x 84\"').",
+          "type": "string"
+        },
+        "z": {
+          "description": "Z coordinate in feet.",
+          "type": "number"
+        },
+        "y": {
+          "description": "Y coordinate in feet.",
+          "type": "number"
+        },
+        "x": {
+          "description": "X coordinate in feet.",
+          "type": "number"
+        },
+        "family_name": {
+          "description": "The exact name of the family (e.g. 'Single-Flush').",
+          "type": "string"
+        }
+      }
+    },
+    "name": "place_family"
+  },
+  {
+    "description": "Creates a linear reference gridline between two XY points in the active Revit project.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "name",
+        "start_x",
+        "start_y",
+        "end_x",
+        "end_y"
+      ],
+      "properties": {
+        "end_x": {
+          "description": "Ending X coordinate in feet.",
+          "type": "number"
+        },
+        "start_y": {
+          "description": "Starting Y coordinate in feet.",
+          "type": "number"
+        },
+        "end_y": {
+          "description": "Ending Y coordinate in feet.",
+          "type": "number"
+        },
+        "start_x": {
+          "description": "Starting X coordinate in feet.",
+          "type": "number"
+        },
+        "name": {
+          "description": "Display name of the grid (e.g. 'Grid A', 'Grid 1').",
+          "type": "string"
+        }
+      }
+    },
+    "name": "create_grid"
+  },
+  {
+    "description": "Creates a new drawing sheet in the active Revit project using the first available Title Block family.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "sheet_number",
+        "sheet_name"
+      ],
+      "properties": {
+        "sheet_name": {
+          "description": "Descriptive title of the sheet (e.g. 'FIRST FLOOR PLAN').",
+          "type": "string"
+        },
+        "sheet_number": {
+          "description": "Unique sheet identifier code (e.g. 'A101', 'A102').",
+          "type": "string"
+        }
+      }
+    },
+    "name": "create_sheet"
+  }
+]

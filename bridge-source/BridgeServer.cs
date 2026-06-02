@@ -96,6 +96,7 @@ namespace RevitAgentBridge
 
             _listener = new HttpListener();
             _listener.Prefixes.Add($"http://127.0.0.1:{port}/execute/");
+            _listener.Prefixes.Add($"http://127.0.0.1:{port}/tools/");
             _listener.Start();
             _isRunning = true;
 
@@ -107,6 +108,15 @@ namespace RevitAgentBridge
             _listenerThread.Start();
         }
 
+        private void WriteJsonResponse(HttpListenerContext context, string json)
+        {
+            byte[] buffer = Encoding.UTF8.GetBytes(json);
+            context.Response.ContentType = "application/json";
+            context.Response.ContentLength64 = buffer.Length;
+            context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+            context.Response.OutputStream.Close();
+        }
+
         private void ListenLoop()
         {
             while (_isRunning && _listener != null && _listener.IsListening)
@@ -115,24 +125,39 @@ namespace RevitAgentBridge
                 {
                     HttpListenerContext context = _listener.GetContext();
                     HttpListenerRequest request = context.Request;
+                    string path = request.Url.AbsolutePath.TrimEnd('/').ToLowerInvariant();
 
-                    string jsonPayload;
-                    using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                    if (path == "/tools")
                     {
-                        jsonPayload = reader.ReadToEnd();
+                        // GET /tools/ — inject a get_tools request into the Python router
+                        // so the daemon can auto-discover all registered tool schemas.
+                        string getToolsPayload = "{\"action\":\"get_tools\",\"parameters\":{}}";
+                        var toolsTask = new AgentTask(getToolsPayload);
+                        _handler.EnqueueTask(toolsTask);
+                        _externalEvent.Raise();
+                        toolsTask.CompletionEvent.WaitOne();
+                        WriteJsonResponse(context, toolsTask.ResultJson);
                     }
+                    else if (path == "/execute")
+                    {
+                        // POST /execute/ — standard tool execution path
+                        string jsonPayload;
+                        using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                        {
+                            jsonPayload = reader.ReadToEnd();
+                        }
 
-                    var task = new AgentTask(jsonPayload);
-                    _handler.EnqueueTask(task);
-                    _externalEvent.Raise();
-
-                    task.CompletionEvent.WaitOne();
-
-                    byte[] buffer = Encoding.UTF8.GetBytes(task.ResultJson);
-                    context.Response.ContentType = "application/json";
-                    context.Response.ContentLength64 = buffer.Length;
-                    context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-                    context.Response.OutputStream.Close();
+                        var task = new AgentTask(jsonPayload);
+                        _handler.EnqueueTask(task);
+                        _externalEvent.Raise();
+                        task.CompletionEvent.WaitOne();
+                        WriteJsonResponse(context, task.ResultJson);
+                    }
+                    else
+                    {
+                        context.Response.StatusCode = 404;
+                        WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Unknown endpoint.\"}");
+                    }
                 }
                 catch (HttpListenerException)
                 {

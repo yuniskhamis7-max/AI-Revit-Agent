@@ -73,9 +73,42 @@ sequenceDiagram
 ---
 
 ## 5. IPC Protocol & API Specifications
-The bridge exposes a single IPC endpoint: `POST http://127.0.0.1:8080/execute/`
+The bridge exposes two HTTP endpoints:
 
-### 1. `get_context`
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `http://127.0.0.1:8080/tools/` | `GET` | Returns the full JSON schema registry of all registered tools |
+| `http://127.0.0.1:8080/execute/` | `POST` | Executes a named tool action with parameters |
+
+### `GET /tools/`
+The daemon calls this at startup to auto-discover all available tools without any manual configuration.
+- **Response Payload**:
+  ```json
+  {
+    "status": "success",
+    "tools": [
+      {
+        "name": "create_grid",
+        "description": "Creates a linear reference gridline...",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "name":    { "type": "string",  "description": "Grid display name." },
+            "start_x": { "type": "number", "description": "Start X in feet." },
+            "start_y": { "type": "number", "description": "Start Y in feet." },
+            "end_x":   { "type": "number", "description": "End X in feet." },
+            "end_y":   { "type": "number", "description": "End Y in feet." }
+          },
+          "required": ["name", "start_x", "start_y", "end_x", "end_y"]
+        }
+      }
+    ]
+  }
+  ```
+
+### `POST /execute/` — System Actions
+
+#### `get_context`
 - **Purpose**: Retrieves general metadata about the active Revit project.
 - **Request Payload**:
   ```json
@@ -95,71 +128,47 @@ The bridge exposes a single IPC endpoint: `POST http://127.0.0.1:8080/execute/`
   }
   ```
 
-### 2. `place_family`
-- **Purpose**: Instantiates a family symbol at a specified 3D location.
-- **Request Payload**:
-  ```json
-  {
-    "action": "place_family",
-    "parameters": {
-      "family_name": "Single-Flush",
-      "type_name": "36\" x 84\"",
-      "level_id": "12345-abc",
-      "coordinates": { "x": 10.0, "y": 5.0, "z": 0.0 }
-    }
-  }
-  ```
-- **Response Payload**:
-  ```json
-  {
-    "status": "success",
-    "message": "Successfully placed element.",
-    "element_id": "98765-xyz"
-  }
-  ```
+### `POST /execute/` — Registered Tools
+All tools registered via `@register_tool` in [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) are automatically available here. The current built-in tools are:
 
-### 3. `create_grid`
-- **Purpose**: Creates a linear grid element in the project.
-- **Request Payload**:
-  ```json
-  {
-    "action": "create_grid",
-    "parameters": {
-      "name": "Grid A",
-      "start_point": { "x": 0.0, "y": 0.0 },
-      "end_point": { "x": 100.0, "y": 0.0 }
-    }
+#### `place_family`
+Places a loaded family symbol at a 3D coordinate on a level.
+```json
+{
+  "action": "place_family",
+  "parameters": {
+    "family_name": "Single-Flush",
+    "type_name": "36\" x 84\"",
+    "level_id": "12345-abc",
+    "x": 10.0, "y": 5.0, "z": 0.0
   }
-  ```
-- **Response Payload**:
-  ```json
-  {
-    "status": "success",
-    "message": "Successfully created Grid 'Grid A'",
-    "element_id": "45678-qwe"
-  }
-  ```
+}
+```
 
-### 4. `create_sheet`
-- **Purpose**: Generates a new sheet layout utilizing the first available Title Block family symbol.
-- **Request Payload**:
-  ```json
-  {
-    "action": "create_sheet",
-    "parameters": {
-      "sheet_number": "A102",
-      "sheet_name": "LOBBY ELEVATIONS"
-    }
+#### `create_grid`
+Creates a linear reference gridline between two XY points.
+```json
+{
+  "action": "create_grid",
+  "parameters": {
+    "name": "Grid A",
+    "start_x": 0.0, "start_y": 0.0,
+    "end_x": 100.0, "end_y": 0.0
   }
-  ```
-- **Response Payload**:
-  ```json
-  {
-    "status": "success",
-    "message": "Successfully created sheet A102 - LOBBY ELEVATIONS",
-    "element_id": "23456-rty"
+}
+```
+
+#### `create_sheet`
+Creates a new drawing sheet using the first available Title Block.
+```json
+{
+  "action": "create_sheet",
+  "parameters": {
+    "sheet_number": "A102",
+    "sheet_name": "LOBBY ELEVATIONS"
   }
-  ```
+}
+```
 
 ---
 
@@ -214,39 +223,46 @@ The project is database-less. The active Revit project database (stored in memor
 
 ## 9. Coding Conventions
 - **C# Bridge**: Standard C# PascalCase conventions. Single-responsibility event handlers. Robust defensive coding to prevent crashing the host Revit application.
-- **Revit-Side Python (IronPython 2.7)**: Strict compatibility requirements. Avoid modern Python 3 syntax (e.g. f-strings, type hinting, async keyword). Use defensive checks for potential null objects returned by `FilteredElementCollector` properties.
+- **Revit-Side Python (IronPython 2.7)**: Strict compatibility requirements. Avoid modern Python 3 syntax (e.g. f-strings, type hinting, async/await, walrus operator). Use `.format()` for string interpolation. Use defensive checks for potential null objects returned by `FilteredElementCollector` properties.
 - **Python Daemon (CPython 3.11+)**: Strict typing, clear structure, and direct integration with Google GenAI function-calling features.
+- **Adding a New Tool**: Only [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) needs to be modified. Decorate the tool with `@register_tool(name, description, parameters)` inside `python_execution_router`. The daemon auto-discovers it on next startup via `GET /tools/`.
 
 ---
 
 ## 10. Integration Points
 - **Revit API**: Direct binding via C# assemblies and pyRevit's `clr` module.
-- **Gemini API**: Auto-injected local Python tools (`place_family_instance`, `create_sheet`) passed as tool definitions to the model.
+- **Gemini API**: Tools are dynamically discovered from the Revit bridge at daemon startup via `GET /tools/` and converted into `types.FunctionDeclaration` objects — no manual definitions needed in the daemon.
+- **Tool Schema File**: The daemon auto-writes `schemas/tools.json` on every startup with the full schema snapshot from the bridge, useful for debugging and version tracking.
 
 ---
 
 ## 11. Known Limitations & Gotchas
-- **IronPython Limitation**: The Python environment inside Revit runs IronPython 2.7. Writing Python 3 code in [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) will throw compilation and runtime syntax exceptions.
+- **IronPython Limitation**: The Python environment inside Revit runs IronPython 2.7. Writing Python 3 code in [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) will throw compilation and runtime syntax exceptions. This includes the `@register_tool` decorator itself — use classic `def` style and `.format()` strings only.
 - **Port Conflicts**: If port `8080` is in use, the C# `HttpListener` will fail to start.
-- **Tool Mismatch**: The action `create_grid` is fully implemented in the Revit-side [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) but has *not* been exposed as an active tool in the daemon's [orchestrator.py](file:///d:/Construction/Projects/ai_revit_agent/daemon/orchestrator.py).
+- **DLL Rebuild Required**: After any change to [BridgeServer.cs](file:///d:/Construction/Projects/ai_revit_agent/bridge-source/BridgeServer.cs), run `dotnet build -c Release` in `bridge-source/` and copy the new `RevitAgentBridge.dll` to the `StartBridge.pushbutton/` directory.
+- **IronPython GC / Closure Rule** ⚠️: IronPython garbage-collects module-level globals after a pyRevit script finishes executing. When C# later invokes `PythonExecutor` (the delegate), only the closure of `python_execution_router` survives in memory. Therefore, `TOOL_REGISTRY`, `TOOL_FUNCTIONS`, `register_tool`, and all tool implementations **must** be defined inside `python_execution_router` — **never at module level**. Breaking this rule causes `NameError: name 'X' is not defined` at dispatch time.
+- **pyRevit Button Title**: Use `button.ui_title` (not `button.title`) to update the ribbon button text at runtime. The title update is best-effort; the `TaskDialog.Show` call is the reliable user feedback path.
 
 ---
 
 ## 12. Ranked File Registry & Entry Points
 
 ### 1. [BridgeServer.cs](file:///d:/Construction/Projects/ai_revit_agent/bridge-source/BridgeServer.cs)
-- **Role**: Core C# threading & server logic. Hosts the HTTP Listener and translates external requests into Revit-safe UI-thread executions using `IExternalEventHandler`.
+- **Role**: Core C# threading & server logic. Hosts the HTTP Listener on two prefixes (`/execute/` and `/tools/`) and translates external requests into Revit-safe UI-thread executions using `IExternalEventHandler`.
 
 ### 2. [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py)
-- **Role**: pyRevit extension entry point. Handles the UI button click, initializes/stops the bridge, registers the python callback router, and implements individual Revit API transaction actions.
+- **Role**: **Single source of truth for all tool definitions.** Hosts the `TOOL_REGISTRY` (JSON schemas) and `TOOL_FUNCTIONS` (implementations) registries. The `@register_tool` decorator auto-populates both. The `get_tools` action serializes the registry to JSON for the daemon. Adding a new Revit tool only requires editing this file.
 
 ### 3. [orchestrator.py](file:///d:/Construction/Projects/ai_revit_agent/daemon/orchestrator.py)
-- **Role**: Daemon orchestrator. Queries Revit context, manages the Gemini chat session, maps Gemini tool-calls to local HTTP requests, and prints progress to the console.
+- **Role**: Daemon orchestrator. Calls `GET /tools/` at startup to auto-discover all available tools, converts them to Gemini `FunctionDeclaration` objects, writes `schemas/tools.json`, then manages the Gemini chat session and dispatches tool-calls to the bridge.
 
 ### 4. [config.py](file:///d:/Construction/Projects/ai_revit_agent/daemon/config.py)
-- **Role**: Project configuration settings. Loads Gemini API credentials and routes local network connection paths.
+- **Role**: Project configuration. Loads Gemini API credentials and defines `REVIT_BRIDGE_URL` and `REVIT_TOOLS_URL`.
 
-### 5. [RevitAgentBridge.csproj](file:///d:/Construction/Projects/ai_revit_agent/bridge-source/RevitAgentBridge.csproj)
+### 5. [schemas/tools.json](file:///d:/Construction/Projects/ai_revit_agent/schemas/tools.json)
+- **Role**: Auto-generated snapshot of the tool registry. Written by the daemon on every startup. Do not edit manually — it is always regenerated from the live bridge.
+
+### 6. [RevitAgentBridge.csproj](file:///d:/Construction/Projects/ai_revit_agent/bridge-source/RevitAgentBridge.csproj)
 - **Role**: C# compiler configuration file targetted for Revit 2025.
 
 ---

@@ -10,7 +10,9 @@ if not GEMINI_API_KEY:
     print("Please set it permanently using: setx GEMINI_API_KEY \"your_key\"")
     sys.exit(1)
 
+# Revit Bridge IPC endpoints
 REVIT_BRIDGE_URL = "http://127.0.0.1:8080/execute/"
+REVIT_TOOLS_URL  = "http://127.0.0.1:8080/tools/"
 
 # Define your preferred active model here:
 # - "gemini-2.5-flash" (Optimized for speed, low latency tool calling)
