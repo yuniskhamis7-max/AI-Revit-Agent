@@ -33,7 +33,7 @@ namespace RevitAgentBridge
         private readonly ConcurrentQueue<AgentTask> _taskQueue = new ConcurrentQueue<AgentTask>();
 
         // This delegate holds our native Python callback function
-        public Func<string, string> PythonExecutor { get; set; }
+        public Func<UIApplication, string, string> PythonExecutor { get; set; }
 
         public void EnqueueTask(AgentTask task)
         {
@@ -52,7 +52,7 @@ namespace RevitAgentBridge
                     if (PythonExecutor != null)
                     {
                         // Safely execute the Python handler directly on Revit's main thread
-                        task.ResultJson = PythonExecutor(task.RequestJson);
+                        task.ResultJson = PythonExecutor(app, task.RequestJson);
                     }
                     else
                     {
@@ -131,7 +131,7 @@ namespace RevitAgentBridge
                     {
                         // GET /tools/ — inject a get_tools request into the Python router
                         // so the daemon can auto-discover all registered tool schemas.
-                        string getToolsPayload = "{\"action\":\"get_tools\",\"parameters\":{}}";
+                        string getToolsPayload = "{\"tool\":\"get_tools\",\"input\":{}}";
                         var toolsTask = new AgentTask(getToolsPayload);
                         _handler.EnqueueTask(toolsTask);
                         _externalEvent.Raise();

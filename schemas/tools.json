@@ -1,52 +1,57 @@
 [
   {
-    "description": "Fetches basic identification metadata about the active Revit project. Returns the document title and file path. Use this for lightweight project identification.",
-    "name": "fetch_project_info",
+    "description": "Fetches basic identification metadata about the active Revit project. Returns the document title and file path.",
+    "agent_instructions": "Call only when the document title or file path is explicitly needed. Do not call this before every action.",
     "parameters": {
       "required": [],
-      "properties": {},
-      "type": "object"
-    }
+      "type": "object",
+      "properties": {}
+    },
+    "name": "fetch_project_info"
   },
   {
-    "description": "Fetches all levels in the active Revit project. Returns each level's name, UniqueId, and elevation in feet. Use this before placing family instances or when you need elevation context.",
-    "name": "fetch_levels",
+    "description": "Fetches all levels in the active Revit project. Returns each level's name, UniqueId, and elevation in feet relative to the Project Base Point.",
+    "agent_instructions": "Call before any tool that requires a level_id. Use the returned 'id' (UniqueId) as-is for the level_id argument \u2014 never use the level name as an id. Match level names to the user's intent (e.g. 'ground floor' maps to 'Level 1'). Elevations are in feet relative to the Project Base Point.",
     "parameters": {
       "required": [],
-      "properties": {},
-      "type": "object"
-    }
+      "type": "object",
+      "properties": {}
+    },
+    "name": "fetch_levels"
   },
   {
-    "description": "Fetches all existing reference gridlines in the active Revit project. Returns each grid's name, UniqueId, and the start/end point coordinates of its curve. Use this before creating new grids to check names and determine spacing.",
-    "name": "fetch_grids",
+    "description": "Fetches all existing reference gridlines in the active Revit project. Returns each grid's name, UniqueId, and start/end point coordinates relative to the Project Base Point in feet.",
+    "agent_instructions": "Call before create_grid. Verify no grid with the target name already exists. Returned coordinates are relative to the Project Base Point in feet \u2014 use these to determine correct spacing and extents for new grids.",
     "parameters": {
       "required": [],
-      "properties": {},
-      "type": "object"
-    }
+      "type": "object",
+      "properties": {}
+    },
+    "name": "fetch_grids"
   },
   {
-    "description": "Fetches all loaded family symbols (types) in the active Revit project. Returns a dictionary mapping family names to lists of their available type names. Use this before placing a family instance to verify the family and type are loaded.",
-    "name": "fetch_families",
+    "description": "Fetches all loaded family symbols (types) in the active Revit project. Returns a dictionary mapping family names to lists of their available type names.",
+    "agent_instructions": "Call before place_family. Use the exact family_name and type_name strings as returned \u2014 do not approximate or guess names. If the required family is not in the list, inform the user it is not loaded in the project.",
     "parameters": {
       "required": [],
-      "properties": {},
-      "type": "object"
-    }
+      "type": "object",
+      "properties": {}
+    },
+    "name": "fetch_families"
   },
   {
-    "description": "Fetches all existing drawing sheets in the active Revit project. Returns each sheet's number, name, and UniqueId. Use this before creating a new sheet to avoid duplicate sheet numbers.",
-    "name": "fetch_sheets",
+    "description": "Fetches all existing drawing sheets in the active Revit project. Returns each sheet's number, name, and UniqueId.",
+    "agent_instructions": "Call before create_sheet. Confirm no sheet with the same sheet_number already exists. Observe the existing numbering convention from the results.",
     "parameters": {
       "required": [],
-      "properties": {},
-      "type": "object"
-    }
+      "type": "object",
+      "properties": {}
+    },
+    "name": "fetch_sheets"
   },
   {
-    "description": "Places a loaded family symbol instance at a specified 3D coordinate on a given level in the active Revit project.",
-    "name": "place_family",
+    "description": "Places a loaded family symbol instance at a specified coordinate on a given level in the active Revit project.",
+    "agent_instructions": "Before calling: (1) Call fetch_levels to get a valid level_id. (2) Call fetch_families to get the exact family_name and type_name. Coordinates x and y are relative to the Project Base Point in feet. Use z=0.0 for level-hosted families unless the user explicitly specifies otherwise.",
     "parameters": {
       "required": [
         "family_name",
@@ -56,38 +61,39 @@
         "y",
         "z"
       ],
+      "type": "object",
       "properties": {
-        "type_name": {
-          "description": "The type name within the family (e.g. '36\" x 84\"').",
-          "type": "string"
-        },
-        "y": {
-          "description": "Y coordinate in feet.",
-          "type": "number"
-        },
-        "family_name": {
-          "description": "The exact name of the family (e.g. 'Single-Flush').",
-          "type": "string"
-        },
         "x": {
-          "description": "X coordinate in feet.",
-          "type": "number"
-        },
-        "z": {
-          "description": "Z coordinate in feet.",
-          "type": "number"
+          "type": "number",
+          "description": "X coordinate in feet, relative to the Project Base Point."
         },
         "level_id": {
-          "description": "The UniqueId of the host level element.",
-          "type": "string"
+          "type": "string",
+          "description": "The UniqueId of the host level element (from fetch_levels)."
+        },
+        "z": {
+          "type": "number",
+          "description": "Z coordinate in feet, relative to the Project Base Point. Use 0.0 for level-hosted families."
+        },
+        "family_name": {
+          "type": "string",
+          "description": "The exact name of the family (e.g. 'Single-Flush')."
+        },
+        "y": {
+          "type": "number",
+          "description": "Y coordinate in feet, relative to the Project Base Point."
+        },
+        "type_name": {
+          "type": "string",
+          "description": "The exact type name within the family (e.g. '36\" x 84\"')."
         }
-      },
-      "type": "object"
-    }
+      }
+    },
+    "name": "place_family"
   },
   {
     "description": "Creates a linear reference gridline between two XY points in the active Revit project.",
-    "name": "create_grid",
+    "agent_instructions": "Before calling: (1) Call fetch_grids to check existing grid names and determine spacing. All coordinates are relative to the Project Base Point in feet. Extend grid lines at least 10 feet beyond the outermost building element on each end.",
     "parameters": {
       "required": [
         "name",
@@ -96,50 +102,52 @@
         "end_x",
         "end_y"
       ],
+      "type": "object",
       "properties": {
-        "end_x": {
-          "description": "Ending X coordinate in feet.",
-          "type": "number"
-        },
         "start_x": {
-          "description": "Starting X coordinate in feet.",
-          "type": "number"
-        },
-        "start_y": {
-          "description": "Starting Y coordinate in feet.",
-          "type": "number"
-        },
-        "end_y": {
-          "description": "Ending Y coordinate in feet.",
-          "type": "number"
+          "type": "number",
+          "description": "Starting X coordinate in feet, relative to the Project Base Point."
         },
         "name": {
-          "description": "Display name of the grid (e.g. 'Grid A', 'Grid 1').",
-          "type": "string"
+          "type": "string",
+          "description": "Display name of the grid (e.g. 'A', '1')."
+        },
+        "end_x": {
+          "type": "number",
+          "description": "Ending X coordinate in feet, relative to the Project Base Point."
+        },
+        "end_y": {
+          "type": "number",
+          "description": "Ending Y coordinate in feet, relative to the Project Base Point."
+        },
+        "start_y": {
+          "type": "number",
+          "description": "Starting Y coordinate in feet, relative to the Project Base Point."
         }
-      },
-      "type": "object"
-    }
+      }
+    },
+    "name": "create_grid"
   },
   {
     "description": "Creates a new drawing sheet in the active Revit project using the first available Title Block family.",
-    "name": "create_sheet",
+    "agent_instructions": "Before calling: (1) Call fetch_sheets to verify the sheet_number is not already used. Follow the project's existing sheet numbering convention as observed from the fetch_sheets results.",
     "parameters": {
       "required": [
         "sheet_number",
         "sheet_name"
       ],
+      "type": "object",
       "properties": {
         "sheet_number": {
-          "description": "Unique sheet identifier code (e.g. 'A101', 'A102').",
-          "type": "string"
+          "type": "string",
+          "description": "Unique sheet identifier code (e.g. 'A101', 'A102')."
         },
         "sheet_name": {
-          "description": "Descriptive title of the sheet (e.g. 'FIRST FLOOR PLAN').",
-          "type": "string"
+          "type": "string",
+          "description": "Descriptive title of the sheet (e.g. 'FIRST FLOOR PLAN')."
         }
-      },
-      "type": "object"
-    }
+      }
+    },
+    "name": "create_sheet"
   }
 ]

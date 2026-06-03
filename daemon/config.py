@@ -11,8 +11,8 @@ if not GEMINI_API_KEY:
     sys.exit(1)
 
 # Revit Bridge IPC endpoints
-REVIT_BRIDGE_URL = "http://127.0.0.1:8080/execute/"
-REVIT_TOOLS_URL  = "http://127.0.0.1:8080/tools/"
+REVIT_EXECUTE_URL   = "http://127.0.0.1:8080/execute/"  # POST — executes a registered tool
+REVIT_DISCOVERY_URL = "http://127.0.0.1:8080/tools/"    # GET  — discovers the tool registry
 
 # Define your preferred active model here:
 # - "gemini-2.5-flash" (Optimized for speed, low latency tool calling)

@@ -3,7 +3,7 @@
 Bridge Client — Communication layer for the Revit Agent Bridge.
 
 Provides:
-    - call_revit_bridge():     Generic POST to /execute/ endpoint.
+    - call_revit_bridge():      Generic POST to /execute/ endpoint.
     - load_tools_from_bridge(): GET /tools/, builds Gemini declarations + dispatch map.
 """
 import json
@@ -11,28 +11,32 @@ import os
 import sys
 import requests
 from google.genai import types
-from config import REVIT_BRIDGE_URL, REVIT_TOOLS_URL
+from config import REVIT_EXECUTE_URL, REVIT_DISCOVERY_URL
 
 
 # =====================================================================
 # LOW-LEVEL BRIDGE COMMUNICATION
 # =====================================================================
 
-def call_revit_bridge(action: str, parameters: dict, timeout: int = 30) -> dict:
+def call_revit_bridge(tool_name: str, tool_input: dict, timeout: int = 30) -> dict:
     """
-    Sends a unified JSON request to the Revit Bridge /execute/ endpoint.
+    Sends a JSON request to the Revit Bridge /execute/ endpoint.
+
+    Payload format:
+        {"tool": "<name>", "input": {<args>}}
+
     Returns the parsed JSON response, or a descriptive error dict on failure.
     """
-    payload = {"action": action, "parameters": parameters}
+    payload = {"tool": tool_name, "input": tool_input}
     try:
-        response = requests.post(REVIT_BRIDGE_URL, json=payload, timeout=timeout)
+        response = requests.post(REVIT_EXECUTE_URL, json=payload, timeout=timeout)
         return response.json()
     except requests.exceptions.RequestException as e:
         return {
             "status": "error",
             "message": (
-                f"Bridge communication failure running action '{action}' "
-                f"with parameters {json.dumps(parameters)}. "
+                f"Bridge communication failure running tool '{tool_name}' "
+                f"with input {json.dumps(tool_input)}. "
                 f"Network exception: {str(e)}"
             )
         }
@@ -47,6 +51,10 @@ def load_tools_from_bridge() -> tuple:
     Calls GET /tools/ on the Revit bridge and converts the returned JSON
     schemas into Gemini FunctionDeclaration objects plus a dispatch map.
 
+    Each tool's agent_instructions (if present) is merged into its description
+    so Gemini reads the operational guidance at the exact moment it selects
+    the tool — no system prompt changes required.
+
     Returns:
         gemini_tools (list[types.FunctionDeclaration]): Ready for Gemini config.
         tool_map (dict[str, callable]): Maps tool name -> bridge dispatcher.
@@ -56,10 +64,10 @@ def load_tools_from_bridge() -> tuple:
     """
     print("[Tool Discovery] Fetching tool registry from Revit bridge...")
     try:
-        response = requests.get(REVIT_TOOLS_URL, timeout=15)
+        response = requests.get(REVIT_DISCOVERY_URL, timeout=15)
         data = response.json()
     except requests.exceptions.RequestException as e:
-        print(f"[Tool Discovery] ERROR: Could not reach {REVIT_TOOLS_URL}. {e}")
+        print(f"[Tool Discovery] ERROR: Could not reach {REVIT_DISCOVERY_URL}. {e}")
         sys.exit(1)
 
     if data.get("status") != "success":
@@ -83,15 +91,24 @@ def load_tools_from_bridge() -> tuple:
     tool_map = {}
 
     for schema in schemas:
-        name = schema["name"]
+        name        = schema["name"]
         description = schema["description"]
-        parameters = schema["parameters"]
+        parameters  = schema["parameters"]
+
+        # Merge agent_instructions into the description that Gemini receives.
+        # This places the "before calling" guidance directly on the tool declaration
+        # so the model reads it at the exact moment it decides to call the tool.
+        agent_instructions = schema.get("agent_instructions", "")
+        if agent_instructions:
+            full_description = description + "\n\nBEFORE CALLING: " + agent_instructions
+        else:
+            full_description = description
 
         # Convert JSON schema dict to Gemini Schema object
         gemini_tools.append(
             types.FunctionDeclaration(
                 name=name,
-                description=description,
+                description=full_description,
                 parameters=types.Schema(
                     type=parameters.get("type", "object"),
                     properties={
@@ -107,13 +124,13 @@ def load_tools_from_bridge() -> tuple:
         )
 
         # Build a generic bridge-dispatch closure for each tool
-        def make_dispatcher(action_name: str):
+        def make_dispatcher(t_name: str):
             def dispatcher(**kwargs) -> dict:
-                print(f"\n[Tool Execution] Calling '{action_name}' with args: {json.dumps(kwargs, indent=2)}")
-                result = call_revit_bridge(action_name, kwargs)
+                print(f"\n[Tool Execution] Calling '{t_name}' with args: {json.dumps(kwargs, indent=2)}")
+                result = call_revit_bridge(t_name, kwargs)
                 print(f"[Observation from Revit] Response: {json.dumps(result, indent=2)}")
                 return result
-            dispatcher.__name__ = action_name
+            dispatcher.__name__ = t_name
             return dispatcher
 
         tool_map[name] = make_dispatcher(name)

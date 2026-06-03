@@ -4,7 +4,7 @@ Revit Agent Bridge Connection Diagnostic Utility.
 
 Tests connectivity to both the /tools/ and /execute/ endpoints,
 verifying that individual fetch tools and the system get_context
-action respond correctly.
+tool respond correctly.
 """
 import sys
 import os
@@ -16,7 +16,7 @@ daemon_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if daemon_dir not in sys.path:
     sys.path.insert(0, daemon_dir)
 
-from config import REVIT_BRIDGE_URL, REVIT_TOOLS_URL
+from config import REVIT_EXECUTE_URL, REVIT_DISCOVERY_URL
 
 
 def test_bridge_connection():
@@ -24,18 +24,18 @@ def test_bridge_connection():
     print("REVIT AGENT BRIDGE CONNECTION DIAGNOSTIC UTILITY")
     print("=====================================================================")
 
-    # 1. Check tools endpoint
-    print(f"\n1. Connecting to Tools Registry Endpoint: {REVIT_TOOLS_URL} ...")
+    # 1. Check tools discovery endpoint
+    print(f"\n1. Connecting to Tool Discovery Endpoint: {REVIT_DISCOVERY_URL} ...")
     try:
-        response = requests.get(REVIT_TOOLS_URL, timeout=5)
+        response = requests.get(REVIT_DISCOVERY_URL, timeout=5)
         if response.status_code == 200:
-            print("[SUCCESS] Tools registry response received.")
+            print("[SUCCESS] Tool discovery response received.")
             data = response.json()
             if data.get("status") == "success":
                 tools = data.get("tools", [])
                 print(f" -> Found {len(tools)} registered tool(s) in Revit:")
 
-                fetch_tools = []
+                fetch_tools  = []
                 action_tools = []
                 for t in tools:
                     if t["name"].startswith("fetch_"):
@@ -57,31 +57,30 @@ def test_bridge_connection():
         else:
             print(f"[FAILURE] Endpoint returned HTTP {response.status_code}.")
     except requests.exceptions.RequestException as e:
-        print(f"[ERROR] Could not connect to tools endpoint. Is Revit running and the bridge started?")
+        print(f"[ERROR] Could not connect to discovery endpoint. Is Revit running and the bridge started?")
         print(f"Details: {e}")
         return False
 
     # 2. Test individual fetch tools
-    fetch_actions = [
+    fetch_tools_to_test = [
         ("fetch_project_info", "Project Info"),
-        ("fetch_levels", "Levels"),
-        ("fetch_grids", "Grids"),
-        ("fetch_families", "Families"),
-        ("fetch_sheets", "Sheets"),
+        ("fetch_levels",       "Levels"),
+        ("fetch_grids",        "Grids"),
+        ("fetch_families",     "Families"),
+        ("fetch_sheets",       "Sheets"),
     ]
 
     print(f"\n2. Testing Individual Fetch Tools via Execute Endpoint...")
-    for action_name, label in fetch_actions:
-        payload = {"action": action_name, "parameters": {}}
+    for tool_name, label in fetch_tools_to_test:
+        payload = {"tool": tool_name, "input": {}}
         try:
-            response = requests.post(REVIT_BRIDGE_URL, json=payload, timeout=10)
+            response = requests.post(REVIT_EXECUTE_URL, json=payload, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 if data.get("status") == "success":
-                    # Summarize result
                     summary_parts = []
                     for key, val in data.items():
-                        if key == "status":
+                        if key in ("status", "coordinate_reference"):
                             continue
                         if isinstance(val, list):
                             summary_parts.append(f"{len(val)} {key}")
@@ -90,7 +89,7 @@ def test_bridge_connection():
                         else:
                             summary_parts.append(f"{key}: {val}")
                     summary = ", ".join(summary_parts) if summary_parts else "OK"
-                    print(f"   [OK] {label:16s} -> {summary}")
+                    print(f"   [OK]   {label:16s} -> {summary}")
                 else:
                     print(f"   [FAIL] {label:16s} -> {data.get('message')}")
             else:
@@ -99,16 +98,16 @@ def test_bridge_connection():
             print(f"   [FAIL] {label:16s} -> {e}")
             return False
 
-    # 3. Test legacy get_context (system action for diagnostics)
-    print(f"\n3. Testing System Action 'get_context' (diagnostic)...")
-    payload = {"action": "get_context", "parameters": {}}
+    # 3. Test system tool get_context (diagnostic)
+    print(f"\n3. Testing System Tool 'get_context' (diagnostic)...")
+    payload = {"tool": "get_context", "input": {}}
     try:
-        response = requests.post(REVIT_BRIDGE_URL, json=payload, timeout=10)
+        response = requests.post(REVIT_EXECUTE_URL, json=payload, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if data.get("status") == "success":
                 print(f"   [OK] Document: {data.get('document_title')}")
-                print(f"   [OK] Levels: {len(data.get('levels', []))}")
+                print(f"   [OK] Levels:   {len(data.get('levels', []))}")
                 print(f"   [OK] Families: {len(data.get('families', {}))}")
             else:
                 print(f"   [FAIL] {data.get('message')}")
