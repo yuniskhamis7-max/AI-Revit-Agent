@@ -17,4 +17,4 @@ REVIT_DISCOVERY_URL = "http://127.0.0.1:8080/tools/"    # GET  — discovers the
 # Define your preferred active model here:
 # - "gemini-2.5-flash" (Optimized for speed, low latency tool calling)
 # - "gemini-2.5-pro"   (Optimized for complex, multi-step geometric reasoning)
-ACTIVE_MODEL = "gemini-2.5-flash"
+ACTIVE_MODEL = "gemini-flash-lite-latest"

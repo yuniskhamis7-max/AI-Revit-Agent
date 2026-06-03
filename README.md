@@ -5,7 +5,9 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/windows)
 [![AI Powered](https://img.shields.io/badge/Gemini-2.5--Flash-orange.svg)](https://deepmind.google/technologies/gemini/)
 
-An agentic integration framework connecting external Large Language Models (powered by the **Google Gemini API**) directly with **Autodesk Revit 2025**. This allows AI agents to fetch live BIM model context and perform safe, thread-controlled modifications (such as placing families, drawing gridlines, or creating sheets) via natural language commands.
+An agentic integration framework connecting external Large Language Models (powered by the **Google Gemini API**) directly with **Autodesk Revit 2025**. This allows AI agents to fetch live BIM model context and perform safe, thread-controlled modifications (such as placing families, drawing gridlines, creating levels/grids, or managing sheets) via natural language commands.
+
+The system features **13 auto-discovered tools** for comprehensive BIM manipulation, **persistent conversation context** for multi-turn interactions, and **intelligent element lifecycle management** including automatic pinning/unpinning.
 
 ---
 
@@ -27,10 +29,14 @@ An agentic integration framework connecting external Large Language Models (powe
 ## ✨ Key Features
 
 *   **🔒 Safe UI-Thread Execution**: Bridges external multi-threaded HTTP requests safely onto Revit's single-threaded main UI thread using `IExternalEventHandler` and `AutoResetEvent` blockers, preventing application crashes.
-*   **🛠️ Dynamic Tool Discovery**: The Python daemon automatically discovers all available BIM tools at startup using the `GET /tools/` endpoint. No manual config is required on the AI side!
+*   **🛠️ Dynamic Tool Discovery**: The Python daemon automatically discovers all 13 available BIM tools at startup using the `GET /tools/` endpoint. No manual config is required on the AI side!
 *   **⚡ Smart Context Fetching**: Instead of sending massive BIM files to the LLM, the agent uses granular `fetch_*` tools to fetch only what is needed dynamically during the conversation.
 *   **🔄 Single Source of Truth**: Define tool schemas and Python actions in one place: the Revit-side Python script. The bridge exposes and dispatches them automatically.
 *   **🤖 Native Gemini Tool Calling**: Uses the new `google-genai` Python SDK to bind discovered bridge APIs directly to the agent's function-calling loop.
+*   **💬 Persistent Conversation Context**: Chat sessions persist across multiple user inputs, enabling multi-turn conversations with context retention. Use the `reset` command to start fresh.
+*   **📌 Element Pinning Lifecycle**: Created elements are automatically pinned for safety; elements are unpinned before deletion to prevent API failures.
+*   **📏 Level Curve Extents**: `fetch_levels` returns horizontal building extents (curve_start_x, curve_end_x) for accurate grid placement aligned to building footprint.
+*   **🛡️ Protected Element Handling**: Deletion operations handle protected/system elements gracefully with individual error recovery.
 
 ---
 
@@ -163,27 +169,85 @@ Start the local Python CLI that connects the Gemini LLM with the Revit instance:
 
 ---
 
+### Available Tools (13 Total)
+
+#### Fetch Tools (5) — Read-Only Context Queries
+| Tool | Description |
+|---|---|
+| `fetch_project_info` | Returns document title and file path |
+| `fetch_levels` | Returns all levels with IDs, elevations, and **curve extents** (curve_start_x, curve_end_x) for building footprint |
+| `fetch_grids` | Returns all grid lines with start/end coordinates |
+| `fetch_families` | Returns loaded family symbols grouped by family name |
+| `fetch_sheets` | Returns all drawing sheets with number, name, and ID |
+
+#### Action Tools (8) — BIM Modifications
+| Tool | Description |
+|---|---|
+| `place_family` | Places a family instance at 3D coordinates on a level |
+| `create_grid` | Creates a linear gridline between two XY points; **auto-pins** the new grid |
+| `create_sheet` | Creates a drawing sheet using the first available title block |
+| `create_level` | Creates a new level at specified elevation; **auto-pins** the new level |
+| `delete_level` | Deletes a level and its dependent elements; **unpins** before deletion, handles protected elements |
+| `delete_grid` | Deletes a grid by ID; **unpins** before deletion |
+| `modify_level` | Updates level elevation and/or name |
+| `modify_grid` | Updates grid start/end points and/or name |
+
+### Element Pinning Behavior
+- **Auto-Pin on Create**: `create_level` and `create_grid` automatically pin newly created elements
+- **Auto-Unpin on Delete**: `delete_level` and `delete_grid` automatically unpin elements before deletion
+- **Why?** Pinned elements cannot be deleted by the Revit API. This lifecycle management prevents deletion failures.
+
+### Conversation Persistence
+- Chat sessions persist across multiple user inputs for multi-turn conversations
+- The agent remembers context from previous messages in the same session
+- Type `reset` in the orchestrator to start a fresh conversation
+- Type `quit` or `exit` to terminate the session
+
+### Level Deletion Order (Critical Constraint)
+Revit requires at least one level to exist at all times. When replacing levels:
+1. **CREATE** new levels FIRST
+2. **THEN DELETE** old levels
+3. After creating new levels, call `fetch_levels` again to get their curve extents for grid placement
+
+---
+
 ## 🔌 IPC API Specification
 
 The bridge server registers an HTTP Listener listening on port **8080** by default.
 
 ### 1. `GET /tools/`
-Called by the daemon at startup. Returns JSON declarations for all registered fetch and action tools.
+Called by the daemon at startup. Returns JSON declarations for all 13 registered fetch and action tools.
 *   **Response Payload Structure**:
     ```json
     {
       "status": "success",
       "tools": [
         {
-          "name": "create_sheet",
-          "description": "Creates a new drawing sheet...",
+          "name": "fetch_levels",
+          "description": "Fetches all levels with IDs, elevations, and curve extents...",
+          "parameters": { "type": "object", "properties": {}, "required": [] }
+        },
+        {
+          "name": "create_level",
+          "description": "Creates a new level at the specified elevation...",
           "parameters": {
             "type": "object",
             "properties": {
-              "sheet_number": { "type": "string", "description": "Unique sheet identifier." },
-              "sheet_name": { "type": "string", "description": "Name of the sheet." }
+              "name": { "type": "string", "description": "Level display name." },
+              "elevation": { "type": "number", "description": "Elevation in feet." }
             },
-            "required": ["sheet_number", "sheet_name"]
+            "required": ["name", "elevation"]
+          }
+        },
+        {
+          "name": "delete_level",
+          "description": "Deletes a level and its dependent elements (views, etc.)...",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "level_id": { "type": "string", "description": "The UniqueId of the level to delete." }
+            },
+            "required": ["level_id"]
           }
         }
       ]
@@ -192,13 +256,31 @@ Called by the daemon at startup. Returns JSON declarations for all registered fe
 
 ### 2. `POST /execute/`
 Sends a command to execute a particular tool inside Revit.
-*   **Request Payload Structure**:
+*   **Request Payload Examples**:
     ```json
     {
-      "action": "create_sheet",
+      "action": "create_level",
       "parameters": {
-        "sheet_number": "A101",
-        "sheet_name": "FLOOR PLAN"
+        "name": "Second Floor",
+        "elevation": 12.0
+      }
+    }
+    ```
+    ```json
+    {
+      "action": "delete_level",
+      "parameters": {
+        "level_id": "12345-abc-67890"
+      }
+    }
+    ```
+    ```json
+    {
+      "action": "create_grid",
+      "parameters": {
+        "name": "Grid A",
+        "start_x": 0.0, "start_y": 0.0,
+        "end_x": 50.0, "end_y": 0.0
       }
     }
     ```
@@ -206,7 +288,7 @@ Sends a command to execute a particular tool inside Revit.
     ```json
     {
       "status": "success",
-      "message": "Successfully created sheet A101 - FLOOR PLAN",
+      "message": "Successfully created Level 'Second Floor' at elevation 12.0 ft",
       "element_id": "12345-abc-67890"
     }
     ```
@@ -248,3 +330,6 @@ The system is designed to be **auto-extending**. If you need to add new capabili
 *   **🐍 IronPython 2.7 Syntax Constraints**: The script running inside pyRevit runs on IronPython 2.7. Modern Python 3 syntax such as f-strings, type hints, or the walrus operator will throw runtime compilation errors. Use standard `.format()` string formatting instead.
 *   **♻️ IronPython GC Closure Rule**: When pyRevit finishes executing a script, it garbage-collects module-level global variables. Because C# invokes the execution router asynchronously, variables defined outside the main router function are lost. **Ensure all tool execution sub-routines, imports, and variables are nested inside the `python_execution_router` function scope.**
 *   **🔒 Single-threaded Revit API Access**: All Revit API commands must run on the thread provided by the `ExternalEvent` handler. Trying to run Revit commands inside a different background thread will cause an immediate Revit crash.
+*   **📌 Pinned Elements**: Some Revit elements are pinned by default or become pinned during operations. The agent automatically handles pinning/unpinning, but custom tools should check `element.Pinned` before deletion.
+*   **🗑️ Protected Elements**: Some system elements (like default views) cannot be deleted. The `delete_level` tool handles this by attempting individual deletion with error recovery for each dependent element.
+*   **⚠️ Level Deletion Order**: Revit requires at least one level. When replacing all levels, always create new ones before deleting old ones.

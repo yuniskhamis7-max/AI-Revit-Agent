@@ -136,14 +136,14 @@ namespace RevitAgentBridge
                         _handler.EnqueueTask(toolsTask);
                         _externalEvent.Raise();
                         
-                        if (toolsTask.CompletionEvent.WaitOne(15000))
+                        if (toolsTask.CompletionEvent.WaitOne(120000))
                         {
                             WriteJsonResponse(context, toolsTask.ResultJson);
                         }
                         else
                         {
                             context.Response.StatusCode = 504;
-                            WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 15 seconds.\"}");
+                            WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 120 seconds.\"}");
                         }
                     }
                     else if (path == "/execute")
@@ -159,14 +159,14 @@ namespace RevitAgentBridge
                         _handler.EnqueueTask(task);
                         _externalEvent.Raise();
 
-                        if (task.CompletionEvent.WaitOne(15000))
+                        if (task.CompletionEvent.WaitOne(120000))
                         {
                             WriteJsonResponse(context, task.ResultJson);
                         }
                         else
                         {
                             context.Response.StatusCode = 504;
-                            WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 15 seconds.\"}");
+                            WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 120 seconds.\"}");
                         }
                     }
                     else

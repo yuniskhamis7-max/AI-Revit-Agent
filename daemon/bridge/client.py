@@ -18,7 +18,7 @@ from config import REVIT_EXECUTE_URL, REVIT_DISCOVERY_URL
 # LOW-LEVEL BRIDGE COMMUNICATION
 # =====================================================================
 
-def call_revit_bridge(tool_name: str, tool_input: dict, timeout: int = 30) -> dict:
+def call_revit_bridge(tool_name: str, tool_input: dict, timeout: int = 120) -> dict:
     """
     Sends a JSON request to the Revit Bridge /execute/ endpoint.
 
@@ -105,23 +105,37 @@ def load_tools_from_bridge() -> tuple:
             full_description = description
 
         # Convert JSON schema dict to Gemini Schema object
+        def _build_property_schema(prop_def: dict) -> types.Schema:
+            """
+            Recursively converts a JSON Schema property definition to a
+            Gemini types.Schema, correctly handling string, number, boolean,
+            integer, and array types (with items for arrays).
+            """
+            prop_type = prop_def.get("type", "string").upper()
+            prop_desc = prop_def.get("description", "")
+
+            if prop_type == "ARRAY":
+                items_def = prop_def.get("items", {})
+                items_schema = _build_property_schema(items_def) if items_def else types.Schema(type="string")
+                return types.Schema(type="array", description=prop_desc, items=items_schema)
+
+            return types.Schema(type=prop_type, description=prop_desc)
+
         gemini_tools.append(
             types.FunctionDeclaration(
                 name=name,
                 description=full_description,
                 parameters=types.Schema(
-                    type=parameters.get("type", "object"),
+                    type=parameters.get("type", "object").upper(),
                     properties={
-                        k: types.Schema(
-                            type=v.get("type", "string"),
-                            description=v.get("description", "")
-                        )
+                        k: _build_property_schema(v)
                         for k, v in parameters.get("properties", {}).items()
                     },
                     required=parameters.get("required", [])
                 )
             )
         )
+
 
         # Build a generic bridge-dispatch closure for each tool
         def make_dispatcher(t_name: str):

@@ -1,0 +1,13 @@
+D:\Construction\Projects\ai_revit_agent\bridge-source\bin\x64\Release\net8.0-windows\RevitAgentBridge.deps.json
+D:\Construction\Projects\ai_revit_agent\bridge-source\bin\x64\Release\net8.0-windows\RevitAgentBridge.dll
+D:\Construction\Projects\ai_revit_agent\bridge-source\bin\x64\Release\net8.0-windows\RevitAgentBridge.pdb
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.csproj.AssemblyReference.cache
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.GeneratedMSBuildEditorConfig.editorconfig
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.AssemblyInfoInputs.cache
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.AssemblyInfo.cs
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.csproj.CoreCompileInputs.cache
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.sourcelink.json
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.dll
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\refint\RevitAgentBridge.dll
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\RevitAgentBridge.pdb
+D:\Construction\Projects\ai_revit_agent\bridge-source\obj\x64\Release\net8.0-windows\ref\RevitAgentBridge.dll

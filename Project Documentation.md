@@ -80,7 +80,7 @@ The bridge exposes two HTTP endpoints:
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `http://127.0.0.1:8080/tools/` | `GET` | Returns the full JSON schema registry of all registered tools |
+| `http://127.0.0.1:8080/tools/` | `GET` | Returns the full JSON schema registry of all 13 registered tools |
 | `http://127.0.0.1:8080/execute/` | `POST` | Executes a named tool action with parameters |
 
 ### `GET /tools/`
@@ -92,19 +92,19 @@ The daemon calls this at startup to auto-discover all available tools without an
     "tools": [
       {
         "name": "fetch_levels",
-        "description": "Fetches all levels in the active Revit project...",
+        "description": "Fetches all levels with IDs, elevations, and curve extents...",
         "parameters": { "type": "object", "properties": {}, "required": [] }
       },
       {
-        "name": "create_grid",
-        "description": "Creates a linear reference gridline...",
+        "name": "create_level",
+        "description": "Creates a new level at the specified elevation...",
         "parameters": {
           "type": "object",
           "properties": {
-            "name":    { "type": "string",  "description": "Grid display name." },
-            "start_x": { "type": "number", "description": "Start X in feet." }
+            "name":      { "type": "string", "description": "Level display name." },
+            "elevation": { "type": "number", "description": "Elevation in feet." }
           },
-          "required": ["name", "start_x", "start_y", "end_x", "end_y"]
+          "required": ["name", "elevation"]
         }
       }
     ]
@@ -135,13 +135,13 @@ The AI agent calls these selectively during the conversation to gather only the 
 | Tool | Response Data |
 |---|---|
 | `fetch_project_info` | `{ "document_title", "file_path" }` |
-| `fetch_levels` | `{ "levels": [{ "name", "id", "elevation" }] }` |
+| `fetch_levels` | `{ "levels": [{ "name", "id", "elevation", **"curve_start_x"**, **"curve_end_x"**, "curve_start_y", "curve_end_y" }] }` — Curve extents define the horizontal building footprint for accurate grid placement |
 | `fetch_grids` | `{ "grids": [{ "name", "id", "start_point", "end_point" }] }` |
 | `fetch_families` | `{ "families": { "FamilyName": ["Type1", ...] } }` |
 | `fetch_sheets` | `{ "sheets": [{ "number", "name", "id" }] }` |
 
 ### `POST /execute/` — Registered Action Tools
-All tools registered via `@register_tool` in [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) are automatically available here. The current built-in action tools are:
+All tools registered via `@register_tool` in [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) are automatically available here. The current 8 built-in action tools are:
 
 #### `place_family`
 Places a loaded family symbol at a 3D coordinate on a level.
@@ -158,7 +158,7 @@ Places a loaded family symbol at a 3D coordinate on a level.
 ```
 
 #### `create_grid`
-Creates a linear reference gridline between two XY points.
+Creates a linear reference gridline between two XY points. **Auto-pins** the new grid.
 ```json
 {
   "action": "create_grid",
@@ -178,6 +178,68 @@ Creates a new drawing sheet using the first available Title Block.
   "parameters": {
     "sheet_number": "A102",
     "sheet_name": "LOBBY ELEVATIONS"
+  }
+}
+```
+
+#### `create_level`
+Creates a new level at the specified elevation. **Auto-pins** the new level.
+```json
+{
+  "action": "create_level",
+  "parameters": {
+    "name": "Second Floor",
+    "elevation": 12.0
+  }
+}
+```
+
+#### `delete_level`
+Deletes a level and all its dependent elements (views, etc.). **Unpins** elements before deletion. Handles protected elements gracefully with individual error recovery.
+```json
+{
+  "action": "delete_level",
+  "parameters": {
+    "level_id": "12345-abc-67890"
+  }
+}
+```
+**Important**: Revit requires at least one level at all times. When replacing levels, CREATE new ones FIRST, then DELETE old ones.
+
+#### `delete_grid`
+Deletes a grid by its UniqueId. **Unpins** before deletion.
+```json
+{
+  "action": "delete_grid",
+  "parameters": {
+    "grid_id": "12345-abc-67890"
+  }
+}
+```
+
+#### `modify_level`
+Updates an existing level's elevation and/or name.
+```json
+{
+  "action": "modify_level",
+  "parameters": {
+    "level_id": "12345-abc-67890",
+    "new_elevation": 15.0,
+    "new_name": "Renamed Level"
+  }
+}
+```
+
+#### `modify_grid`
+Updates an existing grid's start/end points and/or name.
+```json
+{
+  "action": "modify_grid",
+  "parameters": {
+    "grid_id": "12345-abc-67890",
+    "start_x": 10.0, "start_y": 0.0,
+    "end_x": 90.0, "end_y": 0.0,
+    "new_name": "Grid A-Modified"
   }
 }
 ```
@@ -243,6 +305,63 @@ The project is database-less. The active Revit project database (stored in memor
 
 ---
 
+## 9A. Element Pinning Lifecycle
+Revit elements can be "pinned" to prevent accidental deletion. The agent manages this lifecycle automatically:
+
+| Operation | Pinning Behavior |
+|---|---|
+| `create_level` | Auto-pins the newly created level |
+| `create_grid` | Auto-pins the newly created grid |
+| `delete_level` | Unpins the level and all dependent elements before deletion |
+| `delete_grid` | Unpins the grid before deletion |
+
+**Why this matters**: Pinned elements throw an API exception when deletion is attempted. By automatically unpinning before delete operations, the agent prevents these failures.
+
+**Implementation pattern**:
+```python
+# Before deletion
+if element.Pinned:
+    element.Pinned = False
+
+# After creation
+new_element.Pinned = True
+```
+
+---
+
+## 9B. Conversation Persistence
+The Gemini chat session persists across multiple user inputs, enabling multi-turn conversations:
+
+- The `run_agent_loop()` function accepts an optional `chat` parameter
+- The orchestrator maintains a `chat` variable across iterations
+- Each call to `run_agent_loop()` returns the chat session for reuse
+- Type `reset` to start a fresh conversation (sets `chat = None`)
+- Type `quit` or `exit` to terminate the session entirely
+
+**Benefits**:
+- Agent remembers context from previous messages
+- User can issue follow-up commands without repeating context
+- Natural multi-step workflows (e.g., "create levels" → "yes, delete old ones")
+
+---
+
+## 9C. Level Deletion Order Constraint
+Revit requires at least one level to exist at all times. The system prompt enforces this rule:
+
+**Correct workflow when replacing levels**:
+1. `create_level` → Create all new levels first
+2. `fetch_levels` → Get new level IDs and curve extents
+3. `create_grid` → Place grids using new level extents
+4. `delete_level` → Delete old levels last
+
+**Incorrect workflow** (will fail):
+1. `delete_level` → Delete all old levels ❌ (Revit requires at least one)
+2. `create_level` → Create new levels
+
+The system prompt explicitly instructs the agent: "CREATE new levels FIRST, THEN delete old ones."
+
+---
+
 ## 10. Integration Points
 - **Revit API**: Direct binding via C# assemblies and pyRevit's `clr` module.
 - **Gemini API**: Tools are dynamically discovered from the Revit bridge at daemon startup via `GET /tools/` and converted into `types.FunctionDeclaration` objects — no manual definitions needed in the daemon.
@@ -256,6 +375,10 @@ The project is database-less. The active Revit project database (stored in memor
 - **DLL Rebuild Required**: After any change to [BridgeServer.cs](file:///d:/Construction/Projects/ai_revit_agent/bridge-source/BridgeServer.cs), run `dotnet build -c Release` in `bridge-source/` and copy the new `RevitAgentBridge.dll` to the `StartBridge.pushbutton/` directory.
 - **IronPython GC / Closure Rule** ⚠️: IronPython garbage-collects module-level globals after a pyRevit script finishes executing. When C# later invokes `PythonExecutor` (the delegate), only the closure of `python_execution_router` survives in memory. Therefore, `TOOL_REGISTRY`, `TOOL_FUNCTIONS`, `register_tool`, and all tool implementations **must** be defined inside `python_execution_router` — **never at module level**. Breaking this rule causes `NameError: name 'X' is not defined` at dispatch time.
 - **pyRevit Button Title**: Use `button.ui_title` (not `button.title`) to update the ribbon button text at runtime. The title update is best-effort; the `TaskDialog.Show` call is the reliable user feedback path.
+- **Pinned Elements**: Some Revit elements are pinned by default or become pinned during operations. The agent automatically handles pinning/unpinning via `element.Pinned = False` before deletion. Custom tools should check this property.
+- **Protected Elements**: Some system elements (like default floor plan views) cannot be deleted even when unpinned. The `delete_level` tool handles this by attempting individual deletion with try/except for each dependent element, skipping protected ones.
+- **Level Deletion Order**: Revit requires at least one level. Always create new levels before deleting old ones. The system prompt enforces this constraint.
+- **IronPython/.NET Type Conversion**: When using batch deletion with `doc.Delete()`, Python lists must be converted to .NET `List[ElementId]`. Use `from System.Collections.Generic import List as NetList; net_ids = NetList[ElementId](python_list)`.
 
 ---
 
@@ -268,13 +391,18 @@ The project is database-less. The active Revit project database (stored in memor
 - **Role**: **Single source of truth for all tool definitions.** Hosts the `TOOL_REGISTRY` (JSON schemas) and `TOOL_FUNCTIONS` (implementations) registries. The `@register_tool` decorator auto-populates both. Contains both **fetch tools** (read-only context queries) and **action tools** (BIM modifications). Adding a new Revit tool only requires editing this file.
 
 ### 3. [orchestrator.py](file:///d:/Construction/Projects/ai_revit_agent/daemon/orchestrator.py)
-- **Role**: Slim daemon entry point. Calls `load_tools_from_bridge()` at startup, then runs an interactive prompt loop.
+- **Role**: Slim daemon entry point. Calls `load_tools_from_bridge()` at startup, then runs an interactive prompt loop with **persistent chat session**. The chat session is preserved across user inputs for multi-turn conversation continuity. Supports `reset` command to start a fresh conversation.
 
 ### 4. [bridge/client.py](file:///d:/Construction/Projects/ai_revit_agent/daemon/bridge/client.py)
 - **Role**: Bridge communication layer. Contains `call_revit_bridge()` for generic POST requests and `load_tools_from_bridge()` for tool discovery and Gemini FunctionDeclaration conversion.
 
 ### 5. [agent/loop.py](file:///d:/Construction/Projects/ai_revit_agent/daemon/agent/loop.py)
-- **Role**: Gemini agent runtime. Contains the enhanced system prompt for smart context fetching and the `run_agent_loop()` function.
+- **Role**: Gemini agent runtime. Contains the enhanced system prompt with:
+  - Smart context-fetching workflow instructions
+  - **Level deletion order constraint** (create before delete)
+  - **Zero assumptions rule** (no guessing parameters)
+  - Building footprint reasoning using curve extents
+  - The `run_agent_loop()` function accepts an optional `chat` parameter for conversation persistence.
 
 ### 6. [config.py](file:///d:/Construction/Projects/ai_revit_agent/daemon/config.py)
 - **Role**: Project configuration. Loads Gemini API credentials and defines `REVIT_BRIDGE_URL` and `REVIT_TOOLS_URL`.
