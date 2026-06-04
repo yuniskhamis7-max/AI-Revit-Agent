@@ -223,7 +223,7 @@
     "description": "Creates a new reference gridline in the active Revit project. Supports linear geometry, curved (arc) geometry, physical extents, bubble visibility, and view specific offsets."
   },
   {
-    "agent_instructions": "Before calling: (1) Call fetch_grids to get the valid UniqueId for the grid_id parameter. If geometry coordinates are updated, the grid will be adjusted in-place if coincident, or recreated/replaced to support new coordinate layouts.",
+    "agent_instructions": "Before calling: (1) Call fetch_grids to get the valid UniqueId for the grid_id parameter. IMPORTANT: This tool fully handles geometry changes in-place. NEVER use delete_grid + create_grid as a workaround to modify a grid. Always use this tool for any grid modification (position, name, extents, etc.).",
     "parameters": {
       "required": [
         "grid_id"

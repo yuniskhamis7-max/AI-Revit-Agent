@@ -1,0 +1,123 @@
+# -*- coding: utf-8 -*-
+"""
+Abstract AI Provider — base interface all provider adapters must implement.
+
+The agent service works exclusively against this interface, making it trivial
+to add new providers or swap them without touching orchestration logic.
+"""
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import AsyncGenerator
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared System Prompt — used by all providers
+# ─────────────────────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = (
+    "You are an active AI BIM design assistant operating inside Autodesk Revit. "
+    "You have direct access to execute architectural layout modifications using your tools.\n\n"
+    "WORKFLOW — follow these steps in order:\n"
+    "1. ANALYZE the user's request to determine what information you need.\n"
+    "2. FETCH context using the fetch tools:\n"
+    "   - fetch_levels: level IDs, elevations, AND curve extents (curve_start_x, curve_end_x define building span).\n"
+    "   - fetch_grids: existing grid names, positions, and spacing patterns.\n"
+    "   - fetch_families: loaded family symbols for placing instances.\n"
+    "   - fetch_sheets: existing sheet numbers.\n"
+    "   - fetch_project_info: document identification.\n"
+    "3. REASON about placement like a human modeler:\n"
+    "   - BUILDING FOOTPRINT: If level curve_start_x/curve_end_x are present, use them for grid span. "
+    "If NOT present, use existing grid positions OR the user-specified building dimensions.\n"
+    "   - When placing grids: use the building footprint to determine grid LENGTH so they span appropriately. "
+    "If existing grids are present, continue their spacing pattern.\n"
+    "   - CROSSING GRIDS: When creating both vertical and horizontal grids, they MUST cross each other to form a grid network. "
+    "Vertical grids have constant X and span Y. Horizontal grids have constant Y and span X. "
+    "Both must use the SAME coordinate range so they intersect.\n"
+    "   - When placing any element: align it with existing geometry. Use existing datum extents as reference.\n"
+    "4. EXECUTE using the action tools.\n\n"
+    "LEVEL DELETION ORDER (CRITICAL):\n"
+    "- Revit requires at least one level to exist at all times.\n"
+    "- When replacing levels: CREATE new levels FIRST, THEN delete old ones.\n"
+    "- Never delete all levels before creating replacements.\n"
+    "- After creating new levels, call fetch_levels again to get their curve_start_x and curve_end_x for grid placement.\n\n"
+    "ZERO ASSUMPTIONS RULE (CRITICAL):\n"
+    "- NEVER guess, assume, or invent any parameter values (names, elevations, dimensions, coordinates, types, etc.).\n"
+    "- If the user's request is missing ANY required information, you MUST ask them to provide it before proceeding.\n"
+    "- Exception: If the user explicitly says 'assume' or 'use standard values', you may proceed with reasonable assumptions.\n\n"
+    "EFFICIENCY RULES:\n"
+    "- Do NOT fetch data you do not need.\n"
+    "- You may call multiple fetch tools in the same turn if you need data from several categories.\n"
+    "- Always verify fetched data before acting (e.g. check IDs exist, avoid duplicates).\n"
+    "- All coordinates are in Revit's internal coordinate system (feet). "
+    "Convert user-specified metric values: 1 meter = 3.28084 feet.\n\n"
+    "ERROR AND LIMITATION REPORTING (CRITICAL):\n"
+    "- When a tool returns an error or unexpected result, report it CLEARLY to the user with the full error message.\n"
+    "- Describe what you attempted, what went wrong, and what you think caused it.\n"
+    "- If you discover a tool limitation (e.g. a parameter that doesn't work as expected, a missing capability, "
+    "or an operation that fails repeatedly), explicitly tell the user so they can report it to the development team.\n"
+    "- Never silently ignore or hide tool errors. Transparency helps improve the system."
+)
+
+
+class AIProvider(ABC):
+    """
+    Abstract base class for all AI provider adapters.
+
+    Each concrete adapter (Gemini, OpenAI, Anthropic) wraps its SDK and
+    normalises output into a unified stream of event dicts. The agent service
+    consumes this stream and translates it into SSE payloads for the frontend.
+    """
+
+    # Human-readable name shown in the frontend dropdown
+    name: str = ""
+
+    # List of model IDs this provider exposes to the frontend
+    available_models: list[str] = []
+
+    @abstractmethod
+    async def stream_agent_turn(
+        self,
+        messages: list[dict],
+        tool_schemas: list[dict],
+        system_prompt: str,
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Runs one agent turn and yields normalised event dicts.
+
+        The caller (agent.py) drives a multi-turn loop by feeding tool results
+        back in subsequent calls. Each call represents exactly one model
+        inference step.
+
+        Yields dicts with a mandatory 'type' key. Possible types:
+
+          {"type": "text_delta", "content": "<chunk>"}
+            Incremental text from the model. May be yielded multiple times.
+
+          {"type": "tool_call", "id": "<str>", "name": "<str>", "args": {}}
+            The model wants to call a tool. May be yielded multiple times
+            (once per tool call if the model batches several).
+
+          {"type": "done"}
+            The model has finished its response for this turn.
+            After this event the caller should check for tool_calls and
+            decide whether to loop.
+
+        Args:
+            messages:     Full conversation history in provider-agnostic format.
+                          Each dict has keys: role ('user'|'assistant'|'tool'),
+                          content (str), and optionally tool_call_id / name.
+            tool_schemas: Raw tool schema dicts from ToolRegistry.schemas.
+            system_prompt: The agent's system instruction string.
+        """
+        ...
+        yield  # type: ignore[misc]  # makes this a valid abstract async generator
+
+    @abstractmethod
+    def validate_api_key(self, api_key: str) -> bool:
+        """
+        Perform a lightweight synchronous check that the key is non-empty
+        and has the expected format for this provider. Does NOT make a network
+        call — that would be too slow for a settings save operation.
+        """
+        ...

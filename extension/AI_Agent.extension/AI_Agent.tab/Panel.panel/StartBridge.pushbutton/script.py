@@ -8,12 +8,14 @@ from Autodesk.Revit.UI import ExternalEvent
 
 current_dir   = os.path.dirname(__file__)
 dll_full_path = os.path.join(current_dir, "RevitAgentBridge.dll")
+_LOG_PATH     = os.path.join(current_dir, "debug_tool_errors.log")
+_MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 MB rotation
 
 if os.path.exists(dll_full_path):
     try:
         clr.AddReferenceToFileAndPath(dll_full_path)
-    except Exception:
-        print(">>> ERROR: Could not load RevitAgentBridge.dll.")
+    except Exception as e:
+        print(">>> ERROR: Could not load RevitAgentBridge.dll: " + str(e))
         sys.exit()
 else:
     print(">>> ERROR: RevitAgentBridge.dll not found in: " + current_dir)
@@ -40,12 +42,35 @@ def python_execution_router(*args):
     Parses the JSON payload, dispatches to the matching tool, returns JSON.
     """
     import json
+    import time
+    import os
 
     if len(args) == 2:
         ui_app, request_json_string = args
     else:
         ui_app = None
         request_json_string = args[0]
+
+    # -----------------------------------------------------------------
+    # IN-CLOSURE DEBUG LOG (GC-safe — local variables prevent GC issues)
+    # -----------------------------------------------------------------
+    _router_dir = os.path.dirname(__file__)
+    _LOG_FILE = os.path.join(_router_dir, "debug_tool_errors.log")
+    _log_max  = 2 * 1024 * 1024  # 2 MB rotation
+
+    def _log_debug(tool_name, message, level="INFO", _lp=_LOG_FILE, _lm=_log_max):
+        """Append a timestamped entry to the debug log file."""
+        try:
+            if os.path.exists(_lp) and os.path.getsize(_lp) > _lm:
+                backup = _lp + ".old"
+                if os.path.exists(backup):
+                    os.remove(backup)
+                os.rename(_lp, backup)
+            with open(_lp, "a") as f:
+                ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                f.write("[{}] [{}] {}: {}\n".format(ts, level, tool_name, message))
+        except Exception:
+            pass  # Logging must never crash the tool
 
     # -----------------------------------------------------------------
     # IN-CLOSURE TOOL REGISTRY
@@ -76,6 +101,7 @@ def python_execution_router(*args):
     # -----------------------------------------------------------------
     def get_base_point_offset(doc):
         from Autodesk.Revit.DB import FilteredElementCollector, BasePoint, BuiltInParameter
+        last_error = ""
         try:
             collector = FilteredElementCollector(doc).OfClass(BasePoint)
             for bp in collector:
@@ -84,12 +110,15 @@ def python_execution_router(*args):
                         east  = bp.get_Parameter(BuiltInParameter.BASEPOINT_EASTWEST_PARAM).AsDouble()
                         north = bp.get_Parameter(BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM).AsDouble()
                         elev  = bp.get_Parameter(BuiltInParameter.BASEPOINT_ELEVATION_PARAM).AsDouble()
-                        return east, north, elev
-                except Exception:
+                        return east, north, elev, ""
+                except Exception as e:
+                    last_error = "Base point parameter read failed: {}".format(str(e))
                     continue
-        except Exception:
-            pass
-        return 0.0, 0.0, 0.0
+        except Exception as e:
+            return 0.0, 0.0, 0.0, "Failed to collect base points: {}".format(str(e))
+        if last_error:
+            return 0.0, 0.0, 0.0, last_error
+        return 0.0, 0.0, 0.0, "No non-shared base point found in project"
 
     # -----------------------------------------------------------------
     # UNIQUE NAME AND VIEW GENERATION HELPERS
@@ -132,7 +161,7 @@ def python_execution_router(*args):
                     return True
         return False
 
-    def apply_datum_properties(doc, ui_app, datum, params):
+    def apply_datum_properties(doc, ui_app, datum, params, errors=None):
         from Autodesk.Revit.DB import BuiltInParameter, ElementId, DatumEnds, DatumExtentType
         from System.Collections.Generic import HashSet
         
@@ -152,8 +181,9 @@ def python_execution_router(*args):
         if params.get("maximize_3d_extents") is True:
             try:
                 datum.Maximize3DExtents()
-            except Exception:
-                pass
+            except Exception as e:
+                if errors is not None:
+                    errors.append("Maximize3DExtents failed: {}".format(str(e)))
                 
         # 3. View-specific controls
         target_view_id = params.get("target_view_id")
@@ -166,8 +196,9 @@ def python_execution_router(*args):
                     target_view = ui_app.ActiveUIDocument.ActiveView
                 else:
                     target_view = __revit__.ActiveUIDocument.ActiveView
-            except Exception:
-                pass
+            except Exception as e:
+                if errors is not None:
+                    errors.append("Could not get active view: {}".format(str(e)))
                 
         if target_view:
             # Datum Extent Type (2D vs 3D)
@@ -177,8 +208,9 @@ def python_execution_router(*args):
                 try:
                     datum.SetDatumExtentType(DatumEnds.End0, target_view, det)
                     datum.SetDatumExtentType(DatumEnds.End1, target_view, det)
-                except Exception:
-                    pass
+                except Exception as e:
+                    if errors is not None:
+                        errors.append("SetDatumExtentType failed: {}".format(str(e)))
             
             # Show/Hide Bubbles
             if "show_bubble_at_start" in params:
@@ -243,8 +275,9 @@ def python_execution_router(*args):
                             from Autodesk.Revit.DB import Line
                             new_line = Line.CreateBound(new_start, new_end)
                             datum.SetCurveInView(DatumExtentType.ViewSpecific, target_view, new_line)
-                except Exception:
-                    pass
+                except Exception as e:
+                    if errors is not None:
+                        errors.append("Offset curve adjustment failed: {}".format(str(e)))
                     
             # Propagate to Views
             if "propagate_to_views" in params and params["propagate_to_views"]:
@@ -256,17 +289,21 @@ def python_execution_router(*args):
                             parallel_views_set.Add(dest_view.Id)
                     if parallel_views_set.Count > 0:
                         datum.PropagateToViews(target_view, parallel_views_set)
-                except Exception:
-                    pass
+                except Exception as e:
+                    if errors is not None:
+                        errors.append("PropagateToViews failed: {}".format(str(e)))
 
     # -----------------------------------------------------------------
     # SYSTEM TOOL: get_context (internal, not in registered list)
     # -----------------------------------------------------------------
     def tool_get_context(doc, tool_input):
         from Autodesk.Revit.DB import FilteredElementCollector, Level, FamilySymbol
-        pbp_x, pbp_y, pbp_z = get_base_point_offset(doc)
+        pbp_x, pbp_y, pbp_z, pbp_err = get_base_point_offset(doc)
         levels_list   = []
         families_dict = {}
+        errors = []
+        if pbp_err:
+            errors.append("Base point: " + pbp_err)
 
         level_collector = FilteredElementCollector(doc).OfClass(Level).ToElements()
         for lvl in level_collector:
@@ -277,8 +314,8 @@ def python_execution_router(*args):
                         "id":        lvl.UniqueId,
                         "elevation": lvl.Elevation - pbp_z
                     })
-            except Exception:
-                continue
+            except Exception as e:
+                errors.append("Skipped level '{}': {}".format(getattr(lvl, 'Name', '?'), str(e)))
 
         symbol_collector = FilteredElementCollector(doc).OfClass(FamilySymbol).ToElements()
         for symbol in symbol_collector:
@@ -287,18 +324,18 @@ def python_execution_router(*args):
                     fam_name = None
                     try:
                         fam_name = symbol.FamilyName
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        pass  # Try fallback
                     if not fam_name:
                         try:
                             fam_name = symbol.Family.Name
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            pass  # Try fallback
                     if not fam_name:
                         try:
                             fam_name = symbol.Category.Name
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            errors.append("Symbol has no family/category: {}".format(str(e)))
 
                     type_name = symbol.Name
                     if fam_name:
@@ -306,15 +343,18 @@ def python_execution_router(*args):
                             families_dict[fam_name] = []
                         if type_name and type_name not in families_dict[fam_name]:
                             families_dict[fam_name].append(type_name)
-            except Exception:
-                continue
+            except Exception as e:
+                errors.append("Skipped family symbol: {}".format(str(e)))
 
-        return {
+        result = {
             "status":         "success",
             "document_title": doc.Title or "Untitled",
             "levels":         levels_list,
             "families":       families_dict
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     # -----------------------------------------------------------------
     # FETCH TOOLS (Read-only context queries)
@@ -338,31 +378,38 @@ def python_execution_router(*args):
     )
     def tool_fetch_project_info(doc, tool_input):
         file_path = ""
+        file_path_error = ""
         try:
             if doc.PathName:
                 file_path = doc.PathName
-        except Exception:
-            pass
+        except Exception as e:
+            file_path_error = "Could not read file path: {}".format(str(e))
 
-        return {
+        result = {
             "status":         "success",
             "document_title": doc.Title or "Untitled",
             "file_path":      file_path
         }
+        if file_path_error:
+            result["warnings"] = [file_path_error]
+        return result
 
     @register_tool(
         name="fetch_levels",
         description=(
             "Fetches all levels in the active Revit project. Returns each "
             "level's name, UniqueId, elevation in feet relative to the Project Base Point, "
-            "3D curve extents (curve_start_x, curve_end_x in Revit's internal coordinates), "
+            "3D curve extents (curve_start_x, curve_end_x — when available), "
             "associated Scope Box, structural metadata, level type, and view specific settings."
         ),
         agent_instructions=(
             "Call before any tool that requires a level_id. "
             "Use the returned 'id' (UniqueId) as-is for the level_id argument. "
-            "The curve_start_x and curve_end_x values indicate the horizontal span of the building "
-            "— use these when placing grids or other datum elements that should align with the building."
+            "If levels have curve_start_x and curve_end_x, use those for grid extents. "
+            "If curve extents are not available, get extents from: "
+            "(1) existing grids via fetch_grids, or (2) ask the user for building dimensions. "
+            "IMPORTANT: If this tool returns 'status': 'error', STOP immediately and inform the user of the problem. "
+            "Do NOT proceed with other tools until the issue is resolved."
         ),
         parameters={
             "type": "object",
@@ -376,8 +423,11 @@ def python_execution_router(*args):
         }
     )
     def tool_fetch_levels(doc, tool_input):
-        from Autodesk.Revit.DB import FilteredElementCollector, Level, DatumEnds, DatumExtentType, BuiltInParameter, ElementId
-        pbp_x, pbp_y, pbp_z = get_base_point_offset(doc)
+        from Autodesk.Revit.DB import FilteredElementCollector, Level, DatumEnds, DatumExtentType, BuiltInParameter, ElementId, BoundingBoxXYZ, Outline
+        pbp_x, pbp_y, pbp_z, pbp_err = get_base_point_offset(doc)
+        errors = []
+        if pbp_err:
+            errors.append("Base point: " + pbp_err)
         
         target_view_id = tool_input.get("target_view_id")
         target_view = None
@@ -389,8 +439,8 @@ def python_execution_router(*args):
                     target_view = ui_app.ActiveUIDocument.ActiveView
                 else:
                     target_view = __revit__.ActiveUIDocument.ActiveView
-            except Exception:
-                pass
+            except Exception as e:
+                errors.append("Could not get active view: {}".format(str(e)))
 
         levels_list = []
         level_collector = FilteredElementCollector(doc).OfClass(Level).ToElements()
@@ -406,35 +456,55 @@ def python_execution_router(*args):
                 }
                 
                 # Level line extents — report the 3D curve start/end coordinates
-                # so the agent knows the horizontal span of the building.
-                # Use GetCurvesInView to get the level's model curve extents.
+                # ONLY include if we have real level curve data (not fabricated values).
+                # If curves aren't available, the AI should get extents from:
+                #   1. Existing grids (fetch_grids)
+                #   2. User input
+                curve_error = ""
                 try:
-                    # Need a view to get curves - use target_view if available
-                    view_for_curves = target_view
-                    if not view_for_curves:
-                        # Try to find any floor plan view
-                        from Autodesk.Revit.DB import ViewPlan, ViewFamily
-                        plan_collector = FilteredElementCollector(doc).OfClass(ViewPlan)
-                        for v in plan_collector:
-                            if v and not v.IsTemplate:
-                                view_for_curves = v
-                                break
+                    from Autodesk.Revit.DB import ViewType, View
+                    all_views = FilteredElementCollector(doc).OfClass(View).ToElements()
                     
-                    if view_for_curves:
-                        model_curves = lvl.GetCurvesInView(DatumExtentType.Model, view_for_curves)
-                        if model_curves and len(model_curves) > 0:
-                            curve = model_curves[0]
-                            ep0 = curve.GetEndPoint(0)
-                            ep1 = curve.GetEndPoint(1)
-                            # Only add extents if they represent actual data (not just defaults)
-                            if abs(ep1.X - ep0.X) > 0.1 or abs(ep1.Y - ep0.Y) > 0.1:
-                                lvl_data["curve_start_x"] = round(ep0.X, 2)
-                                lvl_data["curve_start_y"] = round(ep0.Y, 2)
-                                lvl_data["curve_end_x"] = round(ep1.X, 2)
-                                lvl_data["curve_end_y"] = round(ep1.Y, 2)
-                except Exception:
-                    # Silently skip - no extents available
-                    pass
+                    x_coords = []
+                    y_coords = []
+                    
+                    for v in all_views:
+                        if not v or v.IsTemplate:
+                            continue
+                        if v.ViewType == ViewType.Elevation or v.ViewType == ViewType.Section:
+                            try:
+                                model_curves = lvl.GetCurvesInView(DatumExtentType.Model, v)
+                                if model_curves:
+                                    for curve in model_curves:
+                                        ep0 = curve.GetEndPoint(0)
+                                        ep1 = curve.GetEndPoint(1)
+                                        x_coords.extend([ep0.X, ep1.X])
+                                        y_coords.extend([ep0.Y, ep1.Y])
+                            except Exception as e:
+                                err_msg = str(e)
+                                if "datum plane cannot be visible" not in err_msg.lower():
+                                    _log_debug("fetch_levels", "GetCurvesInView for '{}' in '{}': {}".format(lvl.Name, v.Name, err_msg), level="DEBUG")
+                                continue
+                                
+                    if x_coords and y_coords:
+                        min_x = min(x_coords)
+                        max_x = max(x_coords)
+                        min_y = min(y_coords)
+                        max_y = max(y_coords)
+                        
+                        lvl_data["curve_start_x"] = round(min_x - pbp_x, 2)
+                        lvl_data["curve_start_y"] = round(min_y - pbp_y, 2)
+                        lvl_data["curve_end_x"] = round(max_x - pbp_x, 2)
+                        lvl_data["curve_end_y"] = round(max_y - pbp_y, 2)
+                    else:
+                        curve_error = "No level curves found across all elevation/section views."
+                except Exception as e:
+                    curve_error = "Curve extents for '{}': {}".format(lvl.Name, str(e))
+                
+                if "curve_start_x" not in lvl_data and curve_error:
+                    errors.append(curve_error)
+                elif "curve_start_x" not in lvl_data:
+                    errors.append("No curve extents available for level '{}' (no valid view or empty curves). Use fetch_grids or ask user for extents.".format(lvl.Name))
                 
                 # Structural
                 struct_param = lvl.get_Parameter(BuiltInParameter.LEVEL_IS_STRUCTURAL)
@@ -479,7 +549,8 @@ def python_execution_router(*args):
                         else:
                             lvl_data["start_offset"] = 0.0
                             lvl_data["end_offset"] = 0.0
-                    except Exception:
+                    except Exception as e:
+                        errors.append("View-specific details for '{}': {}".format(lvl.Name, str(e)))
                         lvl_data["datum_extent_type"] = "3D"
                         lvl_data["show_bubble_at_start"] = False
                         lvl_data["show_bubble_at_end"] = True
@@ -493,13 +564,28 @@ def python_execution_router(*args):
                     lvl_data["end_offset"] = 0.0
                     
                 levels_list.append(lvl_data)
-            except Exception:
-                continue
+            except Exception as e:
+                errors.append("Skipped level '{}': {}".format(getattr(lvl, 'Name', '?'), str(e)))
 
-        return {
+        # If no levels were collected, this is a critical error - the AI cannot proceed
+        if not levels_list:
+            if not errors:
+                errors.append("No levels found in the project. The project may be empty, corrupted, or not a valid Revit model.")
+            return {
+                "status": "error",
+                "message": "Failed to fetch levels: " + errors[0],
+                "errors": errors,
+                "levels": [],
+                "count": 0
+            }
+        
+        result = {
             "status": "success",
             "levels": levels_list
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="fetch_grids",
@@ -510,7 +596,9 @@ def python_execution_router(*args):
             "type, and view specific settings."
         ),
         agent_instructions=(
-            "Call before create_grid or modify_grid to check existing configurations."
+            "Call before create_grid or modify_grid to check existing configurations. "
+            "IMPORTANT: If this tool returns 'status': 'error', STOP and inform the user. "
+            "Do NOT proceed with grid creation/modification until the error is resolved."
         ),
         parameters={
             "type": "object",
@@ -526,6 +614,7 @@ def python_execution_router(*args):
     def tool_fetch_grids(doc, tool_input):
         from Autodesk.Revit.DB import FilteredElementCollector, Grid, DatumEnds, DatumExtentType, BuiltInParameter, ElementId, Arc, Line
         import math
+        errors = []
         
         target_view_id = tool_input.get("target_view_id")
         target_view = None
@@ -537,8 +626,8 @@ def python_execution_router(*args):
                     target_view = ui_app.ActiveUIDocument.ActiveView
                 else:
                     target_view = __revit__.ActiveUIDocument.ActiveView
-            except Exception:
-                pass
+            except Exception as e:
+                errors.append("Could not get active view: {}".format(str(e)))
 
         grids_list = []
         grid_collector = FilteredElementCollector(doc).OfClass(Grid).ToElements()
@@ -641,7 +730,8 @@ def python_execution_router(*args):
                         else:
                             grid_data["start_offset"] = 0.0
                             grid_data["end_offset"] = 0.0
-                    except Exception:
+                    except Exception as e:
+                        errors.append("View-specific details for grid '{}': {}".format(grid.Name, str(e)))
                         grid_data["datum_extent_type"] = "3D"
                         grid_data["show_bubble_at_start"] = False
                         grid_data["show_bubble_at_end"] = True
@@ -655,14 +745,29 @@ def python_execution_router(*args):
                     grid_data["end_offset"] = 0.0
                     
                 grids_list.append(grid_data)
-            except Exception:
-                continue
+            except Exception as e:
+                errors.append("Skipped grid '{}': {}".format(getattr(grid, 'Name', '?'), str(e)))
 
-        return {
+        # If no grids were collected and we expected some, report error
+        # Note: empty grids is valid for new projects, so only error if there were collection errors
+        if not grids_list and errors:
+            return {
+                "status": "error",
+                "message": "Failed to fetch grids: " + errors[0],
+                "errors": errors,
+                "coordinate_reference": "Internal (Revit)",
+                "grids": [],
+                "count": 0
+            }
+        
+        result = {
             "status":               "success",
             "coordinate_reference": "Internal (Revit)",
             "grids":                grids_list
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="fetch_families",
@@ -678,7 +783,9 @@ def python_execution_router(*args):
             "If the required family is not in the list, inform the user it is "
             "not loaded in the project. "
             "IMPORTANT: Always specify a category_filter (e.g. 'Doors', 'Windows', 'Furniture') "
-            "to avoid slow responses from large projects."
+            "to avoid slow responses from large projects. "
+            "If this tool returns 'status': 'error', STOP and inform the user. "
+            "Do NOT attempt to place families until the error is resolved."
         ),
         parameters={
             "type":       "object",
@@ -699,6 +806,7 @@ def python_execution_router(*args):
         
         families_dict = {}
         seen_pairs = set()  # Fast deduplication using (family, type) tuples
+        errors = []
         
         # Build collector - iterate directly without ToElements() for better performance
         collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
@@ -733,19 +841,19 @@ def python_execution_router(*args):
                 fam_name = None
                 try:
                     fam_name = symbol.FamilyName
-                except Exception:
-                    pass
+                except Exception as e:
+                    pass  # Try fallback
                 if not fam_name:
                     try:
                         fam_name = symbol.Family.Name
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        pass  # Try fallback
                 if not fam_name:
                     try:
                         if symbol.Category:
                             fam_name = symbol.Category.Name
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        errors.append("Symbol has no family/category: {}".format(str(e)))
 
                 type_name = symbol.Name
                 if fam_name and type_name:
@@ -755,13 +863,28 @@ def python_execution_router(*args):
                         if fam_name not in families_dict:
                             families_dict[fam_name] = []
                         families_dict[fam_name].append(type_name)
-            except Exception:
-                continue
+            except Exception as e:
+                errors.append("Skipped family symbol: {}".format(str(e)))
 
-        return {
+        # If no families were collected, this is likely a problem
+        if not families_dict:
+            if not errors:
+                errors.append("No family symbols found in the project. The project may be empty or the category filter '{}' returned no results.".format(category_filter or "(none)"))
+            return {
+                "status": "error",
+                "message": "Failed to fetch families: " + errors[0],
+                "errors": errors,
+                "families": {},
+                "count": 0
+            }
+        
+        result = {
             "status":   "success",
             "families": families_dict
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="fetch_sheets",
@@ -772,7 +895,9 @@ def python_execution_router(*args):
         agent_instructions=(
             "Call before create_sheet. "
             "Confirm no sheet with the same sheet_number already exists. "
-            "Observe the existing numbering convention from the results."
+            "Observe the existing numbering convention from the results. "
+            "If this tool returns 'status': 'error', STOP and inform the user. "
+            "Do NOT attempt to create sheets until the error is resolved."
         ),
         parameters={
             "type":       "object",
@@ -783,6 +908,7 @@ def python_execution_router(*args):
     def tool_fetch_sheets(doc, tool_input):
         from Autodesk.Revit.DB import FilteredElementCollector, ViewSheet
         sheets_list = []
+        errors = []
         sheet_collector = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
         for sheet in sheet_collector:
             try:
@@ -792,13 +918,26 @@ def python_execution_router(*args):
                         "name":   sheet.Name or "Unnamed Sheet",
                         "id":     sheet.UniqueId
                     })
-            except Exception:
-                continue
+            except Exception as e:
+                errors.append("Skipped sheet '{}': {}".format(getattr(sheet, 'SheetNumber', '?'), str(e)))
 
-        return {
+        # Empty sheets list is valid for new projects, but report errors if any
+        if not sheets_list and errors:
+            return {
+                "status": "error",
+                "message": "Failed to fetch sheets: " + errors[0],
+                "errors": errors,
+                "sheets": [],
+                "count": 0
+            }
+        
+        result = {
             "status": "success",
             "sheets": sheets_list
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     # -----------------------------------------------------------------
     # ACTION TOOLS (Write operations)
@@ -870,6 +1009,7 @@ def python_execution_router(*args):
 
         target_symbol = None
         collector = FilteredElementCollector(doc).OfClass(FamilySymbol).ToElements()
+        symbol_errors = []
         for s in collector:
             try:
                 if s:
@@ -877,8 +1017,8 @@ def python_execution_router(*args):
                             s.Name.lower() == type_name.lower()):
                         target_symbol = s
                         break
-            except Exception:
-                continue
+            except Exception as e:
+                symbol_errors.append(str(e))
 
         if not target_symbol:
             return {
@@ -888,7 +1028,9 @@ def python_execution_router(*args):
                 )
             }
 
-        pbp_x, pbp_y, pbp_z = get_base_point_offset(doc)
+        pbp_x, pbp_y, pbp_z, pbp_err = get_base_point_offset(doc)
+        if pbp_err:
+            pass  # Use default offsets, warning not critical for placement
 
         with Transaction(doc, "AI Agent - Place Family") as trans:
             trans.Start()
@@ -919,21 +1061,22 @@ def python_execution_router(*args):
             "bubble visibility, and view specific offsets."
         ),
         agent_instructions=(
+            "CRITICAL: Before using this tool, check the response from fetch_levels and fetch_grids. "
+            "If either returns 'status': 'error', STOP and address the error FIRST. Do NOT proceed with grid creation.\n"
             "PLACEMENT CONTEXT — read this carefully before choosing coordinates:\n"
-            "1. ALWAYS call fetch_levels first to get curve_start_x and curve_end_x — these define the building's horizontal span. "
-            "Grids should span AT LEAST from curve_start_x to curve_end_x (or wider) so they appear across all levels.\n"
+            "1. DETERMINE BUILDING EXTENTS from ONE of these sources (in priority order):\n"
+            "   a) Level extents: call fetch_levels and check if levels have curve_start_x and curve_end_x\n"
+            "   b) Existing grids: call fetch_grids and use the existing grid positions/spans\n"
+            "   c) User input: if neither above is available, ASK the user for building dimensions\n"
             "2. ALWAYS call fetch_grids to check existing grids. If grids already exist, place new ones ADJACENT to them "
             "(continue the spacing pattern). Do NOT overlap or place arbitrarily.\n"
             "3. If the user specifies spacing (e.g. '10 meters apart'), convert to feet (1m = 3.28084ft) and apply consistently.\n"
-            "4. If you lack enough information (e.g., no levels exist, user hasn't specified building dimensions), "
-            "ASK the user for clarification before placing. Do not guess.\n"
+            "4. If you lack enough information (no level extents, no existing grids, user hasn't specified dimensions), "
+            "ASK the user for clarification before placing. Do NOT guess or use arbitrary values.\n"
             "5. GRID ORIENTATION — critical for crossing grids:\n"
-            "   - Vertical grids: constant X position, spanning Y from curve_start_x to curve_end_x. "
-            "Example: start_x=X, start_y=curve_start_x, end_x=X, end_y=curve_end_x.\n"
-            "   - Horizontal grids: constant Y position, spanning X from curve_start_x to curve_end_x. "
-            "Example: start_x=curve_start_x, start_y=Y, end_x=curve_end_x, end_y=Y.\n"
-            "   - ALL grids MUST intersect each other to form a proper grid network. "
-            "Vertical and horizontal grids must share the same coordinate ranges.\n"
+            "   - Vertical grids: constant X position, spanning Y across the building width\n"
+            "   - Horizontal grids: constant Y position, spanning X across the building length\n"
+            "   - ALL grids MUST intersect each other to form a proper grid network\n"
             "COORDINATES: All in Revit's internal coordinate system (feet). "
             "Specify either linear (start_x, start_y, end_x, end_y) OR "
             "curved (start_x, start_y, end_x, end_y, arc_point_x, arc_point_y OR "
@@ -1050,6 +1193,7 @@ def python_execution_router(*args):
     def tool_create_grid(doc, tool_input):
         from Autodesk.Revit.DB import Transaction, XYZ, Line, Arc, Grid
         grid_name = tool_input.get("name")
+        errors = []
         
         if not is_grid_name_unique(doc, grid_name):
             return {
@@ -1105,8 +1249,8 @@ def python_execution_router(*args):
                 # Revit's UI does this automatically when drawing manually.
                 try:
                     new_grid.Maximize3DExtents()
-                except Exception:
-                    pass
+                except Exception as e:
+                    errors.append("Maximize3DExtents failed: {}".format(str(e)))
                 
                 # Grid Type
                 if "grid_type_id" in tool_input:
@@ -1115,7 +1259,7 @@ def python_execution_router(*args):
                         new_grid.ChangeTypeId(type_el.Id)
                         
                 # Apply other properties
-                apply_datum_properties(doc, ui_app, new_grid, tool_input)
+                apply_datum_properties(doc, ui_app, new_grid, tool_input, errors)
                 
                 # Pin the grid to prevent accidental deletion
                 new_grid.Pinned = True
@@ -1129,11 +1273,14 @@ def python_execution_router(*args):
                     "message": "Failed to execute Grid.Create: {}".format(str(ex))
                 }
                 
-        return {
+        result = {
             "status":     "success",
             "message":    "Successfully created Grid '{}'.".format(grid_name),
             "element_id": grid_id
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="modify_grid",
@@ -1145,8 +1292,9 @@ def python_execution_router(*args):
         agent_instructions=(
             "Before calling: "
             "(1) Call fetch_grids to get the valid UniqueId for the grid_id parameter. "
-            "If geometry coordinates are updated, the grid will be adjusted in-place if "
-            "coincident, or recreated/replaced to support new coordinate layouts."
+            "IMPORTANT: This tool fully handles geometry changes in-place. "
+            "NEVER use delete_grid + create_grid as a workaround to modify a grid. "
+            "Always use this tool for any grid modification (position, name, extents, etc.)."
         ),
         parameters={
             "type": "object",
@@ -1261,16 +1409,19 @@ def python_execution_router(*args):
         }
     )
     def tool_modify_grid(doc, tool_input):
-        from Autodesk.Revit.DB import Transaction, XYZ, Line, Arc, Grid, BuiltInParameter, ElementId, DatumExtentType, DatumEnds
+        from Autodesk.Revit.DB import (
+            Transaction, XYZ, Line, Arc, Grid, BuiltInParameter, ElementId,
+            DatumExtentType, DatumEnds, ElementTransformUtils
+        )
         grid_id = tool_input["grid_id"]
-        
+
         grid = doc.GetElement(grid_id)
         if not grid or not isinstance(grid, Grid):
             return {
                 "status": "error",
                 "message": "Grid element with UniqueId '{}' not found.".format(grid_id)
             }
-        
+
         new_name = tool_input.get("name")
         if new_name and new_name != grid.Name:
             if not is_grid_name_unique(doc, new_name, exclude_id=grid.UniqueId):
@@ -1278,7 +1429,7 @@ def python_execution_router(*args):
                     "status": "error",
                     "message": "Grid name '{}' is already in use in the active project.".format(new_name)
                 }
-                
+
         target_view_id = tool_input.get("target_view_id")
         target_view = None
         if target_view_id:
@@ -1289,12 +1440,13 @@ def python_execution_router(*args):
                     target_view = ui_app.ActiveUIDocument.ActiveView
                 else:
                     target_view = __revit__.ActiveUIDocument.ActiveView
-            except Exception:
-                pass
-                
+            except Exception as e:
+                pass  # target_view stays None, datum properties that need a view will report error
+
         geo_params = ["start_x", "start_y", "end_x", "end_y", "arc_point_x", "center_x"]
         has_geo = any(p in tool_input for p in geo_params)
-        
+        errors = []
+
         with Transaction(doc, "AI Agent - Modify Grid") as trans:
             trans.Start()
             try:
@@ -1303,7 +1455,7 @@ def python_execution_router(*args):
                     old_is_arc = isinstance(old_curve, Arc) or old_curve.GetType().Name == "Arc"
                     old_start = old_curve.GetEndPoint(0)
                     old_end = old_curve.GetEndPoint(1)
-                    
+
                     # Coordinates in Revit's internal system (no PBP offset)
                     start_x = float(tool_input.get("start_x", old_start.X))
                     start_y = float(tool_input.get("start_y", old_start.Y))
@@ -1311,7 +1463,7 @@ def python_execution_router(*args):
                     end_x = float(tool_input.get("end_x", old_end.X))
                     end_y = float(tool_input.get("end_y", old_end.Y))
                     end_z = float(tool_input.get("end_z", old_end.Z))
-                    
+
                     try:
                         if "arc_point_x" in tool_input or (old_is_arc and "center_x" not in tool_input):
                             if old_is_arc:
@@ -1323,7 +1475,7 @@ def python_execution_router(*args):
                                 def_arc_x = 0.0
                                 def_arc_y = 0.0
                                 def_arc_z = 0.0
-                                
+
                             arc_x = float(tool_input.get("arc_point_x", def_arc_x))
                             arc_y = float(tool_input.get("arc_point_y", def_arc_y))
                             arc_z = float(tool_input.get("arc_point_z", def_arc_z))
@@ -1349,23 +1501,49 @@ def python_execution_router(*args):
                             "status": "error",
                             "message": "Failed to construct new grid curve: {}".format(str(ge))
                         }
-                        
-                    # Strategy 1: try in-place move via LocationCurve (preserves element ID)
+
+                    # Unpin grid if pinned — pinned grids reject curve modifications
+                    was_pinned = grid.Pinned
+                    if was_pinned:
+                        try:
+                            grid.Pinned = False
+                        except Exception as e:
+                            errors.append("Failed to unpin grid: {}".format(str(e)))
+
+                    # Strategy 1: direct curve assignment via LocationCurve (preserves element ID)
                     success_inplace = False
                     try:
                         loc = grid.Location
                         if loc and hasattr(loc, "Curve"):
                             loc.Curve = new_curve
                             success_inplace = True
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        errors.append("Strategy 1 (LocationCurve) failed: {}".format(str(e)))
+
+                    # Strategy 2: transform-based move (works for parallel translation, preserves element ID)
+                    if not success_inplace:
+                        try:
+                            old_mid = old_curve.Evaluate(0.5, True)
+                            new_mid = new_curve.Evaluate(0.5, True)
+                            delta = new_mid - old_mid
+                            if not delta.IsZeroLength():
+                                ElementTransformUtils.MoveElement(doc, grid.Id, delta)
+                                success_inplace = True
+                        except Exception as e:
+                            errors.append("Strategy 2 (MoveElement) failed: {}".format(str(e)))
+
+                    # Re-pin if it was originally pinned and we succeeded in-place
+                    if success_inplace and was_pinned:
+                        try:
+                            grid.Pinned = True
+                        except Exception as e:
+                            errors.append("Failed to re-pin grid: {}".format(str(e)))
 
                     if success_inplace:
-                        # Apply the new name here since the geo-else branch won't run
                         if new_name:
                             grid.Name = new_name
                     else:
-                        # Strategy 2: delete old grid and recreate with new geometry
+                        # Strategy 3 (last resort): delete old grid and recreate with new geometry
                         final_name = new_name or grid.Name
                         type_id = grid.GetTypeId()
                         sb_param = grid.get_Parameter(BuiltInParameter.DATUM_VOLUME_OF_INTEREST)
@@ -1387,13 +1565,13 @@ def python_execution_router(*args):
                 else:
                     if new_name:
                         grid.Name = new_name
-                        
+
                 if "grid_type_id" in tool_input:
                     type_el = doc.GetElement(tool_input["grid_type_id"])
                     if type_el:
                         grid.ChangeTypeId(type_el.Id)
-                        
-                apply_datum_properties(doc, ui_app, grid, tool_input)
+
+                apply_datum_properties(doc, ui_app, grid, tool_input, errors)
                 trans.Commit()
                 grid_id = grid.UniqueId
             except Exception as ex:
@@ -1402,12 +1580,15 @@ def python_execution_router(*args):
                     "status": "error",
                     "message": "Failed to modify Grid: {}".format(str(ex))
                 }
-                
-        return {
+
+        result = {
             "status": "success",
             "message": "Successfully modified Grid '{}'.".format(new_name or grid.Name),
             "element_id": grid_id
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="delete_grid",
@@ -1556,6 +1737,7 @@ def python_execution_router(*args):
         from Autodesk.Revit.DB import Transaction, Level, BuiltInParameter, ViewPlan, ViewFamily
         level_name = tool_input.get("name")
         elevation = float(tool_input.get("elevation", 0.0))
+        errors = []
         
         if not is_level_name_unique(doc, level_name):
             return {
@@ -1563,7 +1745,9 @@ def python_execution_router(*args):
                 "message": "Level name '{}' is already in use in the active project.".format(level_name)
             }
             
-        pbp_x, pbp_y, pbp_z = get_base_point_offset(doc)
+        pbp_x, pbp_y, pbp_z, pbp_err = get_base_point_offset(doc)
+        if pbp_err:
+            errors.append("Base point: " + pbp_err)
         absolute_elevation = elevation + pbp_z
         
         create_floor = tool_input.get("create_floor_plan", True)
@@ -1589,7 +1773,7 @@ def python_execution_router(*args):
                     if type_el:
                         new_level.ChangeTypeId(type_el.Id)
                         
-                apply_datum_properties(doc, ui_app, new_level, tool_input)
+                apply_datum_properties(doc, ui_app, new_level, tool_input, errors)
                 
                 # Generate associated views
                 views_created = []
@@ -1637,11 +1821,14 @@ def python_execution_router(*args):
         if views_created:
             msg += " Generated views: {}.".format(", ".join(views_created))
             
-        return {
+        result = {
             "status": "success",
             "message": msg,
             "element_id": level_id
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="modify_level",
@@ -1737,6 +1924,7 @@ def python_execution_router(*args):
     def tool_modify_level(doc, tool_input):
         from Autodesk.Revit.DB import Transaction, Level, BuiltInParameter, ViewPlan, ViewFamily
         level_id = tool_input["level_id"]
+        errors = []
         
         level = doc.GetElement(level_id)
         if not level or not isinstance(level, Level):
@@ -1745,7 +1933,9 @@ def python_execution_router(*args):
                 "message": "Level element with UniqueId '{}' not found.".format(level_id)
             }
             
-        pbp_x, pbp_y, pbp_z = get_base_point_offset(doc)
+        pbp_x, pbp_y, pbp_z, pbp_err = get_base_point_offset(doc)
+        if pbp_err:
+            errors.append("Base point: " + pbp_err)
         
         new_name = tool_input.get("name")
         if new_name and new_name != level.Name:
@@ -1776,7 +1966,7 @@ def python_execution_router(*args):
                     if type_el:
                         level.ChangeTypeId(type_el.Id)
                         
-                apply_datum_properties(doc, ui_app, level, tool_input)
+                apply_datum_properties(doc, ui_app, level, tool_input, errors)
                 
                 # Generate views if requested and not already existing
                 views_created = []
@@ -1828,11 +2018,14 @@ def python_execution_router(*args):
         if views_created:
             msg += " Generated views: {}.".format(", ".join(views_created))
             
-        return {
+        result = {
             "status": "success",
             "message": msg,
             "element_id": level_id
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="delete_level",
@@ -1861,6 +2054,7 @@ def python_execution_router(*args):
         from Autodesk.Revit.DB import Transaction, Level, FilteredElementCollector, ViewPlan, ElementId
         from System.Collections.Generic import List as NetList
         level_id = tool_input["level_id"]
+        errors = []
         
         level = doc.GetElement(level_id)
         if not level or not isinstance(level, Level):
@@ -1893,9 +2087,8 @@ def python_execution_router(*args):
                             try:
                                 doc.Delete(eid)
                                 deleted_count += 1
-                            except Exception:
-                                # Skip elements that can't be deleted
-                                pass
+                            except Exception as e:
+                                errors.append("Could not delete dependent element {}: {}".format(eid, str(e)))
                 
                 # Finally delete the level itself
                 doc.Delete(level.Id)
@@ -1907,10 +2100,13 @@ def python_execution_router(*args):
                     "message": "Failed to delete Level '{}': {}".format(level_name, str(ex))
                 }
         
-        return {
+        result = {
             "status": "success",
             "message": "Successfully deleted Level '{}' and all associated views/elements.".format(level_name)
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @register_tool(
         name="create_sheet",
@@ -1945,6 +2141,7 @@ def python_execution_router(*args):
         from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, ViewSheet, Transaction
         sheet_number = tool_input.get("sheet_number", "A101")
         sheet_name   = tool_input.get("sheet_name",   "UNNAMED SHEET")
+        errors = []
 
         collector = FilteredElementCollector(doc).OfClass(FamilySymbol).ToElements()
         title_block_symbol = None
@@ -1953,8 +2150,8 @@ def python_execution_router(*args):
                 if symbol and symbol.Category and symbol.Category.Name == "Title Blocks":
                     title_block_symbol = symbol
                     break
-            except Exception:
-                continue
+            except Exception as e:
+                errors.append("Skipped symbol: {}".format(str(e)))
 
         if not title_block_symbol:
             return {
@@ -1973,7 +2170,53 @@ def python_execution_router(*args):
         return {
             "status":     "success",
             "message":    "Successfully created sheet {} - {}.".format(sheet_number, sheet_name),
-            "element_id": sheet_id
+            "element_id": sheet_id,
+            "warnings":   errors if errors else None
+        }
+
+    @register_tool(
+        name="fetch_level_extents_detailed",
+        description="Fetches level extents across all elevation/section views to find the full X and Y bounds.",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    )
+    def tool_fetch_level_extents_detailed(doc, tool_input):
+        from Autodesk.Revit.DB import FilteredElementCollector, Level, View, ViewType, DatumExtentType
+        levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
+        views = FilteredElementCollector(doc).OfClass(View).ToElements()
+        
+        x_min, x_max = None, None
+        y_min, y_max = None, None
+        
+        for lvl in levels:
+            for v in views:
+                if not v or v.IsTemplate:
+                    continue
+                if v.ViewType == ViewType.Elevation or v.ViewType == ViewType.Section:
+                    try:
+                        model_curves = lvl.GetCurvesInView(DatumExtentType.Model, v)
+                        if model_curves:
+                            for curve in model_curves:
+                                ep0 = curve.GetEndPoint(0)
+                                ep1 = curve.GetEndPoint(1)
+                                for pt in [ep0, ep1]:
+                                    x = pt.X
+                                    y = pt.Y
+                                    if x_min is None or x < x_min: x_min = x
+                                    if x_max is None or x > x_max: x_max = x
+                                    if y_min is None or y < y_min: y_min = y
+                                    if y_max is None or y > y_max: y_max = y
+                    except Exception:
+                        continue
+        return {
+            "status": "success",
+            "x_min": x_min,
+            "x_max": x_max,
+            "y_min": y_min,
+            "y_max": y_max
         }
 
     # -----------------------------------------------------------------
@@ -2004,6 +2247,7 @@ def python_execution_router(*args):
         tool_fn = tool_functions.get(tool_name)
 
         if tool_fn:
+            _log_debug(tool_name, "Executing with input: {}".format(json.dumps(tool_input)))
             result = tool_fn(doc, tool_input)
         else:
             result = {
@@ -2011,9 +2255,22 @@ def python_execution_router(*args):
                 "message": "Tool '{}' has no registered implementation inside Revit.".format(tool_name)
             }
 
+        # Log result status and any warnings/errors
+        result_status = result.get("status", "unknown")
+        if result_status == "error":
+            _log_debug(tool_name, "ERROR: {}".format(result.get("message", "unknown error")), level="ERROR")
+        if result.get("warnings"):
+            for w in result["warnings"]:
+                _log_debug(tool_name, "WARNING: {}".format(w), level="WARN")
+        if result.get("errors"):
+            for e in result["errors"]:
+                _log_debug(tool_name, "ERROR DETAIL: {}".format(e), level="ERROR")
+        _log_debug(tool_name, "Completed with status: {}".format(result_status))
+
         return json.dumps(result)
 
     except Exception as ex:
+        _log_debug("dispatch", "FATAL: {}".format(str(ex)), level="FATAL")
         return json.dumps({"status": "error", "message": "Fatal exception in Python: " + str(ex)})
 
 
