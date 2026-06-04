@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import type { Components } from 'react-markdown';
 import type { ChatMessage, ToolCall } from '@/types';
 import { ToolCallCard } from './ToolCallCard';
 
@@ -9,96 +12,87 @@ interface MessageBubbleProps {
 /** Detect if text is predominantly RTL (Arabic, Hebrew, etc.) */
 function detectDir(text: string): 'rtl' | 'ltr' {
   if (!text) return 'ltr';
-  // Count RTL characters vs LTR characters
   const rtlChars = (text.match(/[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/g) || []).length;
-  const ltrChars = (text.match(/[a-zA-Z]/g) || []).length;
+  const ltrChars  = (text.match(/[a-zA-Z]/g) || []).length;
   return rtlChars > ltrChars ? 'rtl' : 'ltr';
 }
 
+/**
+ * Strip [object Object] serialisation artifacts that can appear when the SDK
+ * accidentally serialises a React state object instead of a string value.
+ * This guards the single remaining sanitisation point — the root cause has
+ * been fixed in providerStore.ts but legacy DB content may still contain this.
+ */
+function sanitiseContent(text: string): string {
+  return text.replace(/\[object Object\]\s*/g, '').trim();
+}
+
+// Custom react-markdown component overrides — applies project CSS classes
+// so markdown elements match the existing design system without inline styles.
+const markdownComponents: Components = {
+  // Code blocks
+  pre: ({ children }) => (
+    <div className="markdown-code-block">
+      <pre>{children}</pre>
+    </div>
+  ),
+  code: ({ node, className, children, ...props }) => {
+    // Inline code (no language class)
+    const isBlock = Boolean(className);
+    if (isBlock) {
+      const lang = className?.replace('language-', '');
+      return (
+        <>
+          {lang && <div className="code-lang-label">{lang}</div>}
+          <code className={className} {...props}>{children}</code>
+        </>
+      );
+    }
+    return <code className="inline-code" {...props}>{children}</code>;
+  },
+  // Paragraphs
+  p: ({ children }) => <p className="markdown-p">{children}</p>,
+  // Headings
+  h1: ({ children }) => <h1 className="markdown-h1">{children}</h1>,
+  h2: ({ children }) => <h2 className="markdown-h2">{children}</h2>,
+  h3: ({ children }) => <h3 className="markdown-h3">{children}</h3>,
+  // Lists
+  ul: ({ children }) => <ul className="markdown-ul">{children}</ul>,
+  ol: ({ children }) => <ol className="markdown-ol">{children}</ol>,
+  li: ({ children }) => <li className="markdown-li">{children}</li>,
+  // Links — open in new tab
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="markdown-link">
+      {children}
+    </a>
+  ),
+  // Horizontal rule
+  hr: () => <hr className="markdown-hr" />,
+  // Blockquote
+  blockquote: ({ children }) => <blockquote className="markdown-blockquote">{children}</blockquote>,
+  // Table (GFM)
+  table: ({ children }) => (
+    <div className="markdown-table-wrapper">
+      <table className="markdown-table">{children}</table>
+    </div>
+  ),
+};
+
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
-  const isUser = message.role === 'user';
-  const isStreaming = message.role === 'streaming' || message.isStreaming;
-  const dir = useMemo(() => detectDir(message.content), [message.content]);
-  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const isUser      = message.role === 'user';
+  const isStreaming  = message.role === 'streaming' || message.isStreaming;
+  const dir          = useMemo(() => detectDir(message.content), [message.content]);
+
+  const [thinkingOpen,      setThinkingOpen]      = useState(false);
   const [agentThoughtsOpen, setAgentThoughtsOpen] = useState(false);
 
-  const hasThinking = message.thinking && message.thinking.length > 0;
+  const hasThinking     = message.thinking      && message.thinking.length > 0;
   const hasAgentThoughts = message.agentThoughts && message.agentThoughts.length > 0;
 
-  // Lightweight inline markdown formatter (handles bold, code blocks, and list items)
-  const formatContent = (text: string) => {
-    if (!text) return null;
-    // Filter out [object Object] artifacts from SDK serialization
-    const cleaned = text.replace(/\[object Object\]\s*/g, '');
-    if (!cleaned.trim()) return null;
-    
-    // Split by code blocks
-    const parts = cleaned.split(/(```[\s\S]*?```)/g);
-    
-    return parts.map((part, idx) => {
-      if (part.startsWith('```')) {
-        // Code block
-        const codeLines = part.slice(3, -3).trim().split('\n');
-        // Check if first line is language
-        let lang = '';
-        let code = part.slice(3, -3).trim();
-        if (codeLines[0] && !codeLines[0].includes(' ') && codeLines[0].length < 10) {
-          lang = codeLines[0];
-          code = codeLines.slice(1).join('\n');
-        }
-        return (
-          <div key={idx} className="markdown-code-block">
-            {lang && <div className="code-lang-label">{lang}</div>}
-            <pre><code>{code}</code></pre>
-          </div>
-        );
-      }
-
-      // Normal text: split by newlines first
-      const lines = part.split('\n');
-      
-      return lines.map((line, lineIdx) => {
-        if (!line.trim()) return null;
-
-        // Process inline styling (bold and code tags) for this line
-        const textParts = line.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-        const formattedLine = textParts.map((tPart, tIdx) => {
-          if (tPart.startsWith('`') && tPart.endsWith('`')) {
-            return <code key={tIdx} className="inline-code">{tPart.slice(1, -1)}</code>;
-          }
-          if (tPart.startsWith('**') && tPart.endsWith('**')) {
-            return <strong key={tIdx}>{tPart.slice(2, -2)}</strong>;
-          }
-          return tPart;
-        });
-
-        if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-          // Format the list item content without the leading bullet mark
-          const listContentParts = line.replace(/^\s*[-*]\s+/, '').split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-          const formattedListContent = listContentParts.map((tPart, tIdx) => {
-            if (tPart.startsWith('`') && tPart.endsWith('`')) {
-              return <code key={tIdx} className="inline-code">{tPart.slice(1, -1)}</code>;
-            }
-            if (tPart.startsWith('**') && tPart.endsWith('**')) {
-              return <strong key={tIdx}>{tPart.slice(2, -2)}</strong>;
-            }
-            return tPart;
-          });
-          return (
-            <li key={`${idx}-${lineIdx}`} className="markdown-li">
-              {formattedListContent}
-            </li>
-          );
-        }
-
-        return (
-          <p key={`${idx}-${lineIdx}`} className="markdown-p">
-            {formattedLine}
-          </p>
-        );
-      });
-    });
-  };
+  const cleanedContent = useMemo(
+    () => sanitiseContent(message.content),
+    [message.content],
+  );
 
   return (
     <div className={`message-bubble-wrapper ${isUser ? 'user-wrapper' : 'assistant-wrapper'}`} dir={dir}>
@@ -113,7 +107,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           </div>
         )}
       </div>
-      
+
       <div className="message-content-area">
         {/* Agent Thoughts block — synthetic [agent thought] events from the orchestrator */}
         {!isUser && hasAgentThoughts && (
@@ -128,7 +122,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
               <span>
                 Agent activity ({message.agentThoughts!.length} step{message.agentThoughts!.length !== 1 ? 's' : ''})
               </span>
-              <span className={`thinking-arrow ${agentThoughtsOpen ? 'open' : ''}`}>{"\u25BC"}</span>
+              <span className={`thinking-arrow ${agentThoughtsOpen ? 'open' : ''}`}>{'\u25BC'}</span>
             </button>
             {agentThoughtsOpen && (
               <div className="agent-thoughts-content">
@@ -142,7 +136,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           </div>
         )}
 
-        {/* Thinking / Reasoning block (from model's chain-of-thought — rarely shown now) */}
+        {/* Thinking / Reasoning block (from model's chain-of-thought) */}
         {!isUser && hasThinking && (
           <div className="thinking-block">
             <button className="thinking-toggle" onClick={() => setThinkingOpen(!thinkingOpen)}>
@@ -150,7 +144,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                 <path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/>
               </svg>
               <span>Model reasoning</span>
-              <span className={`thinking-arrow ${thinkingOpen ? 'open' : ''}`}>{"\u25BC"}</span>
+              <span className={`thinking-arrow ${thinkingOpen ? 'open' : ''}`}>{'\u25BC'}</span>
             </button>
             {thinkingOpen && (
               <div className="thinking-content">{message.thinking}</div>
@@ -160,12 +154,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
         <div className={`message-bubble ${isUser ? 'user-bubble' : 'assistant-bubble'}`}>
           <div className="message-text">
-            {formatContent(message.content)}
-            {isStreaming && message.content === '' && (
+            {cleanedContent ? (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+              >
+                {cleanedContent}
+              </ReactMarkdown>
+            ) : (
+              isStreaming && <span className="streaming-cursor">█</span>
+            )}
+            {isStreaming && cleanedContent && (
               <span className="streaming-cursor">█</span>
             )}
           </div>
-          
+
           <div className="message-time">
             {message.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>

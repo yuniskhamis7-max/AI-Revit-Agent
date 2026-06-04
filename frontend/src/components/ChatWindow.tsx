@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '@/hooks/useChat';
-import { useChatStore } from '@/store/chatStore';
+import { useMessageStore } from '@/store/messageStore';
+import { useSessionStore } from '@/store/sessionStore';
 import { MessageBubble } from './MessageBubble';
 import type { ChatMessage } from '@/types';
 
 export const ChatWindow: React.FC = () => {
-  const { messages, isStreaming, activeSessionId } = useChatStore();
+  const { messages, isStreaming } = useMessageStore();
+  const { activeSessionId } = useSessionStore();
   const { sendMessage, cancelStream } = useChat();
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);

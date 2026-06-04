@@ -10,6 +10,10 @@ current_dir   = os.path.dirname(__file__)
 dll_full_path = os.path.join(current_dir, "RevitAgentBridge.dll")
 _LOG_PATH     = os.path.join(current_dir, "debug_tool_errors.log")
 _MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 MB rotation
+_PORT         = 8080
+_LOG_LEVEL    = "INFO"
+_LOG_LEVEL_RANK = {"DEBUG": 0, "INFO": 1, "WARN": 2, "WARNING": 2, "ERROR": 3, "FATAL": 4}
+
 
 if os.path.exists(dll_full_path):
     try:
@@ -54,13 +58,14 @@ def python_execution_router(*args):
     # -----------------------------------------------------------------
     # IN-CLOSURE DEBUG LOG (GC-safe — local variables prevent GC issues)
     # -----------------------------------------------------------------
-    _router_dir = os.path.dirname(__file__)
-    _LOG_FILE = os.path.join(_router_dir, "debug_tool_errors.log")
-    _log_max  = 2 * 1024 * 1024  # 2 MB rotation
-
-    def _log_debug(tool_name, message, level="INFO", _lp=_LOG_FILE, _lm=_log_max):
-        """Append a timestamped entry to the debug log file."""
+    def _log_debug(tool_name, message, level="INFO", _lp=_LOG_PATH, _lm=_MAX_LOG_SIZE):
+        """Append a timestamped entry to the debug log file if severity >= _LOG_LEVEL."""
         try:
+            req_rank = _LOG_LEVEL_RANK.get(level.upper(), 1)
+            cfg_rank = _LOG_LEVEL_RANK.get(_LOG_LEVEL.upper(), 1)
+            if req_rank < cfg_rank:
+                return
+
             if os.path.exists(_lp) and os.path.getsize(_lp) > _lm:
                 backup = _lp + ".old"
                 if os.path.exists(backup):
@@ -68,7 +73,7 @@ def python_execution_router(*args):
                 os.rename(_lp, backup)
             with open(_lp, "a") as f:
                 ts = time.strftime("%Y-%m-%d %H:%M:%S")
-                f.write("[{}] [{}] {}: {}\n".format(ts, level, tool_name, message))
+                f.write("[{}] [{:5s}] {}: {}\n".format(ts, level, tool_name, message))
         except Exception:
             pass  # Logging must never crash the tool
 
@@ -2247,9 +2252,13 @@ def python_execution_router(*args):
         tool_fn = tool_functions.get(tool_name)
 
         if tool_fn:
-            _log_debug(tool_name, "Executing with input: {}".format(json.dumps(tool_input)))
+            _log_debug(tool_name, "Executing with input: {}".format(json.dumps(tool_input)), level="DEBUG")
+            _t0 = time.time()
             result = tool_fn(doc, tool_input)
+            _elapsed = time.time() - _t0
         else:
+            _t0 = None
+            _elapsed = None
             result = {
                 "status":  "error",
                 "message": "Tool '{}' has no registered implementation inside Revit.".format(tool_name)
@@ -2265,7 +2274,11 @@ def python_execution_router(*args):
         if result.get("errors"):
             for e in result["errors"]:
                 _log_debug(tool_name, "ERROR DETAIL: {}".format(e), level="ERROR")
-        _log_debug(tool_name, "Completed with status: {}".format(result_status))
+
+        if _elapsed is not None:
+            _log_debug(tool_name, "Completed with status: {} in {:.3f}s".format(result_status, _elapsed), level="INFO")
+        else:
+            _log_debug(tool_name, "Completed with status: {}".format(result_status), level="INFO")
 
         return json.dumps(result)
 
@@ -2285,7 +2298,7 @@ if BridgeRegistry.ActiveServer is not None:
         BridgeRegistry.ActiveServer.Stop()
         BridgeRegistry.ActiveServer = None
         print(">>> AI Agent Bridge STOPPED.")
-        print(">>> The server is no longer listening on port 8080.")
+        print(">>> The server is no longer listening on port {}.".format(_PORT))
     except Exception as ex:
         print(">>> ERROR while stopping the bridge: " + str(ex))
 else:
@@ -2297,12 +2310,12 @@ else:
         external_event = ExternalEvent.Create(handler)
 
         bridge_server = BridgeServer(handler, external_event)
-        bridge_server.Start(8080)
+        bridge_server.Start(_PORT)
 
         BridgeRegistry.ActiveServer = bridge_server
         BridgeRegistry.ActiveEvent  = external_event
 
-        print(">>> AI Agent Bridge STARTED — Listening on port 8080.")
+        print(">>> AI Agent Bridge STARTED — Listening on port {}.".format(_PORT))
         print(">>> Launch orchestrator.py in the daemon folder to begin a session.")
     except Exception as ex:
         print(">>> ERROR: Failed to start the Bridge Server: " + str(ex))

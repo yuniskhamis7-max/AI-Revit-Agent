@@ -346,6 +346,10 @@ All backend configuration is managed via `backend/.env` (or environment variable
 
 API keys can also be configured at runtime via the **Settings Panel** in the web UI (stored in the SQLite database).
 
+> **Note:** The Revit bridge port is configurable inside the extension's [script.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py) via the `_PORT` constant (defaults to `8080`). If modified, update `REVIT_BRIDGE_PORT` in `backend/.env` to match.
+>
+> Logging verbosity for the extension can also be configured in `script.py` using the `_LOG_LEVEL` constant (e.g. `"DEBUG"`, `"INFO"`, `"WARN"`, `"ERROR"`, `"FATAL"`).
+
 ---
 
 ## Extending the System (Adding New Tools)

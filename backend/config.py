@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     default_provider: str = "gemini"
     default_model: str = "gemini-2.5-flash"
 
+    # Maximum number of agent loop turns per conversation turn.
+    # Increase for complex multi-step Revit automations, decrease for faster
+    # responses in simple fetch-only workflows.
+    agent_max_turns: int = 20
+
     # ── Revit Bridge ─────────────────────────────────────────────────────────
     revit_bridge_host: str = "http://127.0.0.1"
     revit_bridge_port: int = 8080
@@ -63,7 +68,6 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         db_file = Path(__file__).parent / self.database_path
-        db_file.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite+aiosqlite:///{db_file}"
 
     # ── CORS ─────────────────────────────────────────────────────────────────

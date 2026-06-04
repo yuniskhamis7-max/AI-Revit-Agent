@@ -1,6 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { streamChat, approveToolCall } from '@/api/chat';
-import { useChatStore } from '@/store/chatStore';
+import { useMessageStore } from '@/store/messageStore';
+import { useApprovalStore } from '@/store/approvalStore';
+import { useSessionStore } from '@/store/sessionStore';
+import { useProviderStore } from '@/store/providerStore';
 import type { SSEEvent, ToolCall, ChatMessage } from '@/types';
 
 /**
@@ -8,7 +11,7 @@ import type { SSEEvent, ToolCall, ChatMessage } from '@/types';
  *
  * Encapsulates:
  *  - Sending a message and opening the SSE stream
- *  - Dispatching each SSE event type into the Zustand store
+ *  - Dispatching each SSE event type into the focused Zustand stores
  *  - Approval gate (approve / reject tool calls)
  *  - Stream cancellation via AbortController
  */
@@ -19,7 +22,10 @@ export function useChat() {
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   const sendMessage = useCallback(async (userText: string) => {
-    const { activeSessionId, activeProvider, activeModel } = useChatStore.getState();
+    const { activeSessionId } = useSessionStore.getState();
+    const { activeProvider, activeModel } = useProviderStore.getState();
+    const messageStore = useMessageStore.getState();
+
     if (!activeSessionId || !userText.trim()) return;
 
     // Cancel previous stream if still open
@@ -27,7 +33,7 @@ export function useChat() {
     abortRef.current = new AbortController();
 
     // Add the user message to the UI immediately (optimistic)
-    useChatStore.getState().addMessage({
+    messageStore.addMessage({
       id: crypto.randomUUID(),
       role: 'user',
       content: userText.trim(),
@@ -50,8 +56,8 @@ export function useChat() {
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
-      useChatStore.getState().clearStreamingState();
-      useChatStore.getState().addMessage({
+      useMessageStore.getState().clearStreamingState();
+      useMessageStore.getState().addMessage({
         id: crypto.randomUUID(),
         role: 'assistant',
         content: `⚠️ Connection error: ${err instanceof Error ? err.message : String(err)}`,
@@ -61,16 +67,16 @@ export function useChat() {
   }, []);
 
   const approve = useCallback(async (approved: boolean) => {
-    const { pendingApproval } = useChatStore.getState();
+    const { pendingApproval, setPendingApproval } = useApprovalStore.getState();
     if (!pendingApproval) return;
 
     const { toolCall, sessionId } = pendingApproval;
 
     // Dismiss the modal immediately for snappy UX
-    useChatStore.getState().setPendingApproval(null);
+    setPendingApproval(null);
 
     // Update the tool call card status in the message
-    useChatStore.getState().updateToolCall('streaming-placeholder', toolCall.id, {
+    useMessageStore.getState().updateToolCall('streaming-placeholder', toolCall.id, {
       status: approved ? 'executing' : 'rejected',
       approved,
     });
@@ -84,7 +90,7 @@ export function useChat() {
 
   const cancelStream = useCallback(() => {
     abortRef.current?.abort();
-    useChatStore.getState().clearStreamingState();
+    useMessageStore.getState().clearStreamingState();
   }, []);
 
   return { sendMessage, approve, cancelStream };
@@ -95,19 +101,20 @@ export function useChat() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function _handleSSEEvent(event: SSEEvent, sessionId: string) {
-  const store = useChatStore.getState();
+  const msg      = useMessageStore.getState();
+  const approval = useApprovalStore.getState();
 
   switch (event.type) {
     case 'text_delta':
-      store.appendStreamingText(event.content ?? '');
+      msg.appendStreamingText(event.content ?? '');
       break;
 
     case 'thinking_delta':
-      store.appendThinking(event.content ?? '');
+      msg.appendThinking(event.content ?? '');
       break;
 
     case 'agent_thought':
-      store.appendAgentThought(event.content ?? '');
+      msg.appendAgentThought(event.content ?? '');
       break;
 
     case 'tool_call_pending': {
@@ -118,16 +125,16 @@ function _handleSSEEvent(event: SSEEvent, sessionId: string) {
         requires_approval: event.requires_approval ?? false,
         status: event.requires_approval ? 'awaiting' : 'pending',
       };
-      store.updateToolCall('streaming-placeholder', tc.id, tc);
+      msg.updateToolCall('streaming-placeholder', tc.id, tc);
       break;
     }
 
     case 'tool_call_executing':
-      store.updateToolCall('streaming-placeholder', event.id!, { status: 'executing' });
+      msg.updateToolCall('streaming-placeholder', event.id!, { status: 'executing' });
       break;
 
     case 'tool_result':
-      store.updateToolCall('streaming-placeholder', event.id!, {
+      msg.updateToolCall('streaming-placeholder', event.id!, {
         status: 'done',
         result: event.result,
         approved: event.approved ?? undefined,
@@ -135,19 +142,18 @@ function _handleSSEEvent(event: SSEEvent, sessionId: string) {
       break;
 
     case 'agent_paused': {
-      // Find the pending tool call from the streaming message
-      const messages = store.messages;
+      const { messages } = useMessageStore.getState();
       const streamingMsg = messages.find((m: ChatMessage) => m.isStreaming);
       const tc = streamingMsg?.toolCalls?.find((t: ToolCall) => t.id === event.awaiting_approval_id);
       if (tc) {
-        store.setPendingApproval({ toolCall: tc, sessionId });
+        approval.setPendingApproval({ toolCall: tc, sessionId });
       }
       break;
     }
 
     case 'error':
-      store.clearStreamingState();
-      store.addMessage({
+      msg.clearStreamingState();
+      msg.addMessage({
         id: crypto.randomUUID(),
         role: 'assistant',
         content: `⚠️ ${event.message ?? 'Unknown error'}${event.detail ? `\n\n${event.detail}` : ''}`,
@@ -156,7 +162,7 @@ function _handleSSEEvent(event: SSEEvent, sessionId: string) {
       break;
 
     case 'done':
-      store.finaliseStreamingMessage(event.message_id ?? crypto.randomUUID());
+      msg.finaliseStreamingMessage(event.message_id ?? crypto.randomUUID());
       break;
   }
 }

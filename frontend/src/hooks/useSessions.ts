@@ -1,11 +1,12 @@
 import { useEffect, useCallback } from 'react';
 import { sessionsApi } from '@/api/chat';
-import { useChatStore } from '@/store/chatStore';
+import { useSessionStore } from '@/store/sessionStore';
+import { useMessageStore } from '@/store/messageStore';
 import type { ChatMessage, MessageRole, ToolCall } from '@/types';
 
 export function useSessions() {
-  const activeSessionId = useChatStore((s) => s.activeSessionId);
-  const sessions = useChatStore((s) => s.sessions);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const sessions = useSessionStore((s) => s.sessions);
 
   // Fetch all sessions
   const loadSessions = useCallback(async () => {
@@ -49,7 +50,7 @@ export function useSessions() {
           createdAt: new Date(m.created_at),
         };
       });
-      useChatStore.getState().setMessages(chatMessages);
+      useMessageStore.getState().setMessages(chatMessages);
     } catch (err) {
       console.error(`Failed to load messages for session ${id}:`, err);
     }
@@ -65,15 +66,15 @@ export function useSessions() {
     if (activeSessionId) {
       loadActiveSessionMessages(activeSessionId);
     } else {
-      useChatStore.getState().setMessages([]);
+      useMessageStore.getState().setMessages([]);
     }
   }, [activeSessionId, loadActiveSessionMessages]);
 
   const createSession = useCallback(async (name: string) => {
     try {
       const newSession = await sessionsApi.create(name);
-      useChatStore.getState().addSession(newSession);
-      useChatStore.getState().setActiveSession(newSession.id);
+      useSessionStore.getState().addSession(newSession);
+      useSessionStore.getState().setActiveSession(newSession.id);
       return newSession;
     } catch (err) {
       console.error('Failed to create session:', err);
@@ -84,7 +85,7 @@ export function useSessions() {
   const deleteSession = useCallback(async (id: string) => {
     try {
       await sessionsApi.delete(id);
-      useChatStore.getState().removeSession(id);
+      useSessionStore.getState().removeSession(id);
     } catch (err) {
       console.error('Failed to delete session:', err);
     }
@@ -93,7 +94,7 @@ export function useSessions() {
   const renameSession = useCallback(async (id: string, name: string) => {
     try {
       await sessionsApi.rename(id, name);
-      useChatStore.getState().renameSession(id, name);
+      useSessionStore.getState().renameSession(id, name);
     } catch (err) {
       console.error('Failed to rename session:', err);
     }

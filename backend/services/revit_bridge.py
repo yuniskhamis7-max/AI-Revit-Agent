@@ -24,6 +24,47 @@ logger = logging.getLogger(__name__)
 # Schema snapshot path — written on every tool discovery for debugging
 _SCHEMA_SNAPSHOT_PATH = Path(__file__).parent.parent / "schemas" / "tools.json"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared HTTP client singleton
+# ─────────────────────────────────────────────────────────────────────────────
+# Created once at application startup (main.py lifespan) and closed on shutdown.
+# Using a persistent client enables HTTP keep-alive to the local Revit bridge
+# and avoids repeated connection setup overhead on every tool execution.
+#
+# NOTE: Single-process only. If the application ever runs with multiple workers
+# each process will have its own client instance, which is correct behavior.
+
+_http_client: httpx.AsyncClient | None = None
+
+
+def init_http_client() -> None:
+    """Create the shared HTTP client. Called once from the lifespan startup."""
+    global _http_client
+    _http_client = httpx.AsyncClient(timeout=30.0)
+    logger.debug("Revit bridge HTTP client initialised.")
+
+
+async def close_http_client() -> None:
+    """Close the shared HTTP client. Called once from the lifespan shutdown."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+        logger.debug("Revit bridge HTTP client closed.")
+
+
+def _get_client() -> httpx.AsyncClient:
+    """Returns the shared client, creating a fallback if not yet initialised."""
+    if _http_client is None:
+        # Fallback: create a temporary client if called before lifespan init
+        # (e.g. in tests or standalone scripts). Not ideal but safe.
+        logger.warning(
+            "HTTP client requested before init_http_client() was called. "
+            "Creating a temporary client. Ensure init_http_client() is called at startup."
+        )
+        return httpx.AsyncClient(timeout=30.0)
+    return _http_client
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Health Check
@@ -36,9 +77,9 @@ async def check_bridge_health() -> bool:
     """
     settings = get_settings()
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(settings.revit_discovery_url)
-            return response.status_code == 200
+        client = _get_client()
+        response = await client.get(settings.revit_discovery_url, timeout=3.0)
+        return response.status_code == 200
     except Exception:
         return False
 
@@ -60,10 +101,10 @@ async def discover_tools() -> list[dict]:
     """
     settings = get_settings()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(settings.revit_discovery_url)
-            response.raise_for_status()
-            data = response.json()
+        client = _get_client()
+        response = await client.get(settings.revit_discovery_url, timeout=15.0)
+        response.raise_for_status()
+        data = response.json()
 
         if data.get("status") != "success":
             raise RuntimeError(f"Bridge returned error: {data.get('message')}")
@@ -140,12 +181,16 @@ async def execute_tool(tool_name: str, tool_input: dict[str, Any], timeout: int 
     logger.debug("Bridge execute: tool=%s args=%s", tool_name, json.dumps(tool_input))
 
     try:
-        async with httpx.AsyncClient(timeout=float(timeout)) as client:
-            response = await client.post(settings.revit_execute_url, json=payload)
-            response.raise_for_status()
-            result = response.json()
-            logger.debug("Bridge response: %s", json.dumps(result))
-            return result
+        client = _get_client()
+        response = await client.post(
+            settings.revit_execute_url,
+            json=payload,
+            timeout=float(timeout),
+        )
+        response.raise_for_status()
+        result = response.json()
+        logger.debug("Bridge response: %s", json.dumps(result))
+        return result
 
     except Exception as exc:
         error_msg = (

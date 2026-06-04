@@ -1,9 +1,9 @@
 import React from 'react';
 import { useChat } from '@/hooks/useChat';
-import { useChatStore } from '@/store/chatStore';
+import { useApprovalStore } from '@/store/approvalStore';
 
 export const ApprovalModal: React.FC = () => {
-  const { pendingApproval } = useChatStore();
+  const { pendingApproval } = useApprovalStore();
   const { approve } = useChat();
 
   if (!pendingApproval) return null;

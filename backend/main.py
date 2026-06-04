@@ -3,11 +3,13 @@
 FastAPI Application — Entry point for the AI-Revit Agent backend.
 
 Startup sequence:
-  1. Create SQLite tables (idempotent)
-  2. Discover Revit tools from bridge (soft-fail in DEVELOPMENT_MODE)
-  3. Load tool registry
-  4. Mount API routers
-  5. Serve React SPA from frontend/dist/ (if built)
+  1. Ensure data/ directory exists
+  2. Create SQLite tables (idempotent) + run column migrations
+  3. Initialise shared HTTP client
+  4. Discover Revit tools from bridge (soft-fail in DEVELOPMENT_MODE)
+  5. Load tool registry
+  6. Mount API routers
+  7. Serve React SPA from frontend/dist/ (if built)
 
 Run in development:
   uvicorn main:app --reload --port 8000
@@ -31,8 +33,9 @@ from api.providers import router as providers_router
 from api.sessions import router as sessions_router
 from api.settings import router as settings_router
 from config import get_settings
-from database import create_all_tables, engine
-from services.revit_bridge import discover_tools
+from database import create_all_tables
+from migrations import run_startup_migrations
+from services.revit_bridge import discover_tools, init_http_client, close_http_client
 from services.tool_registry import registry
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,22 +52,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Lightweight migrations (run once at startup)
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def _migrate_add_agent_thoughts() -> None:
-    """Add agent_thoughts column to messages table if it doesn't exist."""
-    from sqlalchemy import text, inspect as sa_inspect
-    async with engine.begin() as conn:
-        def _check(sync_conn):
-            insp = sa_inspect(sync_conn)
-            cols = [c['name'] for c in insp.get_columns('messages')]
-            return 'agent_thoughts' not in cols
-        needs_col = await conn.run_sync(_check)
-        if needs_col:
-            await conn.execute(text("ALTER TABLE messages ADD COLUMN agent_thoughts TEXT"))
-            logger.info("Migration: added agent_thoughts column to messages table.")
+# Startup schema migrations are managed in backend/migrations.py
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,13 +67,19 @@ async def lifespan(app: FastAPI):
     logger.info("  DEVELOPMENT_MODE = %s", settings.development_mode)
     logger.info("=" * 60)
 
-    # 1. Initialise database
+    # 1. Ensure the data/ directory exists before touching the DB
+    db_file = Path(__file__).parent / settings.database_path
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # 2. Initialise database tables and run column migrations
     await create_all_tables()
-    # Migrate: add agent_thoughts column if missing (for existing DBs)
-    await _migrate_add_agent_thoughts()
+    await run_startup_migrations()
     logger.info("Database tables ready.")
 
-    # 2. Discover Revit tools
+    # 3. Initialise shared HTTP client (for Revit bridge calls)
+    init_http_client()
+
+    # 4. Discover Revit tools
     try:
         schemas = await discover_tools()
         registry.load(schemas)
@@ -106,6 +100,7 @@ async def lifespan(app: FastAPI):
     yield  # ← application runs here
 
     logger.info("Backend shutting down.")
+    await close_http_client()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

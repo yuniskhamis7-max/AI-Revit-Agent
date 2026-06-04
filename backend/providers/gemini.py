@@ -151,7 +151,7 @@ class GeminiProvider(AIProvider):
         # Convert provider-agnostic messages to Gemini Content objects
         gemini_contents = _to_gemini_contents(messages)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
             lambda: self._send_with_retry(gemini_contents, config),

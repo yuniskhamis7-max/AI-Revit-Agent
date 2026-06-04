@@ -65,9 +65,14 @@ class Message(Base):
     role values:
       'user'        — human input
       'assistant'   — model text output
-      'tool_result' — observation returned to the model after tool execution
+      'tool'        — observation returned to the model after tool execution
 
     tool_calls is a JSON string: list of {id, name, args, requires_approval}
+
+    tool_call_id links a 'tool' role message back to the specific tool call
+    in the preceding 'assistant' message. Used by _db_messages_to_history()
+    to reconstruct provider-correct multi-turn history without positional guessing.
+
     approved is only meaningful for action tool calls:
       None  → fetch tool (no approval needed)
       True  → user approved
@@ -84,6 +89,7 @@ class Message(Base):
     tool_calls: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     agent_thoughts: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tool_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    tool_call_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     approved: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False

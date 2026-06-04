@@ -27,18 +27,32 @@ _REDISCOVER_COOLDOWN = 5.0
 # Tool classification
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Cached lookup for quick classification after the registry is loaded.
+# Maps tool_name -> requires_approval (bool).
+_approval_cache: dict[str, bool] = {}
+
+
 def is_read_tool(tool_name: str) -> bool:
     """
     Returns True for read-only fetch tools (auto-executed without approval).
-    Convention: any tool whose name starts with 'fetch_' is a read tool.
-    All other tools are write/action tools that require human approval.
+
+    Classification priority:
+      1. Explicit 'requires_approval' field in the tool schema (preferred).
+         Set by the Revit bridge in register_tool() if present.
+      2. Naming convention fallback: tools starting with 'fetch_' are read tools.
+         Used for schemas that don't include the explicit field (legacy or external).
     """
+    if tool_name in _approval_cache:
+        return not _approval_cache[tool_name]
+    # Fallback to naming convention
     return tool_name.startswith("fetch_")
 
 
 def requires_approval(tool_name: str) -> bool:
     """Inverse of is_read_tool — used when building SSE events."""
-    return not is_read_tool(tool_name)
+    if tool_name in _approval_cache:
+        return _approval_cache[tool_name]
+    return not tool_name.startswith("fetch_")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,13 +77,20 @@ class ToolRegistry:
     def load(self, schemas: list[dict]) -> None:
         """
         Populate the registry from the raw schema list returned by discover_tools().
-        Builds the dispatcher map in the same pass.
+        Builds the dispatcher map and approval cache in the same pass.
         """
         self._schemas = schemas
         self._dispatcher_map = {
             schema["name"]: _make_dispatcher(schema["name"])
             for schema in schemas
         }
+        # Populate approval cache from explicit schema field (if present).
+        # Falls back to naming convention at call time when field is absent.
+        _approval_cache.clear()
+        for schema in schemas:
+            name = schema["name"]
+            if "requires_approval" in schema:
+                _approval_cache[name] = bool(schema["requires_approval"])
         self._loaded = True
         logger.info(
             "ToolRegistry loaded %d tools (%d read, %d write)",

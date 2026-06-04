@@ -1,10 +1,10 @@
 import React, { useCallback } from 'react';
-import { useChatStore } from '@/store/chatStore';
+import { useProviderStore } from '@/store/providerStore';
 import { providersApi } from '@/api/settings';
 import type { Provider } from '@/types';
 
 export const ProviderSelector: React.FC = () => {
-  const { providers, activeProvider, activeModel, setActiveProvider, setProviders } = useChatStore();
+  const { providers, activeProvider, activeModel, setActiveProvider, setProviders } = useProviderStore();
 
   const currentProvider = providers.find((p: Provider) => p.name === activeProvider);
 

@@ -129,10 +129,10 @@ async def run_agent_stream(
     # Working copy of history — we append to this across turns
     history = list(messages)
 
-    MAX_TURNS = 20
+    max_turns = settings.agent_max_turns
     turn = 0
 
-    while turn < MAX_TURNS:
+    while turn < max_turns:
         turn += 1
         logger.debug("Agent turn %d", turn)
 
@@ -150,7 +150,9 @@ async def run_agent_stream(
         text_parts: list[str] = []
         pending_tool_calls: list[dict] = []
 
-        # Buffer for detecting [object Object] split across text_delta chunks
+        # Single place where [object Object] filtering is applied to prevent these
+        # artifacts from being either streamed to the frontend or persisted to the DB.
+        # Buffer handles cases where the artifact is split across consecutive text_delta chunks.
         _OBJ_ARTIFACT = "[object Object]"
         _text_buffer = ""  # Holds trailing chars that might be a partial artifact
 
@@ -356,9 +358,9 @@ async def run_agent_stream(
             })
 
     # ── All turns complete ────────────────────────────────────────────────
-    if turn >= MAX_TURNS:
+    if turn >= max_turns:
         yield sse.error(
-            "Agent exceeded maximum turn limit.", detail=f"MAX_TURNS={MAX_TURNS}"
+            "Agent exceeded maximum turn limit.", detail=f"max_turns={max_turns}"
         )
 
     yield sse.done(session_id=session_id, message_id=message_id)

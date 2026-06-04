@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useChatStore } from '@/store/chatStore';
+import { useUIStore } from '@/store/uiStore';
+import { useProviderStore } from '@/store/providerStore';
 import { providersApi } from '@/api/settings';
 import type { Provider } from '@/types';
 
 export const SettingsPanel: React.FC = () => {
-  const { settingsPanelOpen, setSettingsPanelOpen, providers, setProviders } = useChatStore();
+  const { settingsPanelOpen, setSettingsPanelOpen } = useUIStore();
+  const { providers, setProviders } = useProviderStore();
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
   const [maskedKeys, setMaskedKeys] = useState<Record<string, string | null>>({});

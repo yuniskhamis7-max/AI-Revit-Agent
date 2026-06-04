@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useSessions } from '@/hooks/useSessions';
-import { useChatStore } from '@/store/chatStore';
+import { useUIStore } from '@/store/uiStore';
+import { useSessionStore } from '@/store/sessionStore';
 import { revitApi } from '@/api/settings';
 import type { Session } from '@/types';
 
 export const SessionSidebar: React.FC = () => {
   const { sessions, activeSessionId, createSession, deleteSession, renameSession } = useSessions();
-  const { revitStatus, sidebarOpen, toggleSidebar, setSettingsPanelOpen, revitToolCount, setRevitToolCount } = useChatStore();
+  const { revitStatus, sidebarOpen, toggleSidebar, setSettingsPanelOpen, revitToolCount, setRevitToolCount } = useUIStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [isRefreshingTools, setIsRefreshingTools] = useState(false);
@@ -80,7 +81,7 @@ export const SessionSidebar: React.FC = () => {
             <div
               key={session.id}
               className={`session-item ${isActive ? 'active' : ''}`}
-              onClick={() => !isEditing && useChatStore.getState().setActiveSession(session.id)}
+              onClick={() => !isEditing && useSessionStore.getState().setActiveSession(session.id)}
             >
               <div className="session-item-content">
                 <svg viewBox="0 0 24 24" width="16" height="16" className="chat-icon">
