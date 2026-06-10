@@ -1,8 +1,22 @@
 import { api, openSSEStream } from './client';
 import type { Session, SessionDetail, SSEEvent } from '@/types';
 
-// ── Sessions ─────────────────────────────────────────────────────────────────
+/**
+ * Session and Chat API client.
+ *
+ * Provides typed wrappers for session CRUD operations and the streaming
+ * chat endpoint that drives the agent conversation loop.
+ */
 
+/**
+ * Session CRUD operations.
+ *
+ * @property list   - Fetch all sessions (newest first).
+ * @property create - Create a new session with the given name.
+ * @property get    - Fetch a single session with its full message history.
+ * @property rename - Update the name of an existing session.
+ * @property delete - Delete a session and all its messages.
+ */
 export const sessionsApi = {
   list:   ()                               => api.get<Session[]>('/sessions'),
   create: (name: string)                   => api.post<Session>('/sessions', { name }),
@@ -13,6 +27,14 @@ export const sessionsApi = {
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Payload for initiating a chat turn via POST /api/chat.
+ *
+ * @property session_id - UUID of the session this message belongs to.
+ * @property message    - User's natural language input text.
+ * @property provider   - Optional override for the AI provider name.
+ * @property model      - Optional override for the model ID.
+ */
 export interface ChatPayload {
   session_id: string;
   message: string;
@@ -31,6 +53,17 @@ export function streamChat(
   return openSSEStream('/chat', payload, signal) as AsyncGenerator<SSEEvent>;
 }
 
+/**
+ * Send a tool call approval or rejection to the backend.
+ *
+ * Unblocks the paused agent loop for the given session. The agent resumes
+ * asynchronously after this call.
+ *
+ * @param session_id  - UUID of the session whose agent is paused.
+ * @param approval_id - UUID of the specific tool call being decided.
+ * @param approved    - True to allow execution, False to reject.
+ * @returns Server acknowledgement with the approval decision.
+ */
 export const approveToolCall = (
   session_id: string,
   approval_id: string,

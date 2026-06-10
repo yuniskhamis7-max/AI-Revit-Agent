@@ -1,13 +1,27 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 
+/**
+ * Error boundary state shape.
+ *
+ * @property hasError - True after an error has been caught.
+ * @property error    - The caught Error object, or null.
+ */
 interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
 }
 
+/**
+ * Error boundary props.
+ *
+ * @property children - React tree to protect from render errors.
+ * @property fallback - Optional custom fallback render function.
+ *                      Receives the error and a reset callback.
+ *                      Defaults to the built-in recovery UI.
+ */
 interface ErrorBoundaryProps {
   children: ReactNode;
-  /** Optional fallback — defaults to the built-in recovery UI */
   fallback?: (error: Error, reset: () => void) => ReactNode;
 }
 

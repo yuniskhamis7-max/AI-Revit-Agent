@@ -29,12 +29,38 @@ router = APIRouter(prefix="/api/providers", tags=["providers"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ProviderUpdate(BaseModel):
+    """
+    Request body for updating a provider's configuration.
+
+    All fields are optional — only provided fields are updated.
+
+    Attributes:
+        api_key:      New API key to store for this provider. Validated for format.
+        active_model: Model ID to use for this provider. Rejected if it contains
+                      serialisation artifacts like '[object Object]'.
+        active:       If True, activates this provider and deactivates all others.
+                      If False, deactivates this provider.
+    """
     api_key: str | None = None
     active_model: str | None = None
     active: bool | None = None
 
 
 class ProviderOut(BaseModel):
+    """
+    Enriched provider response returned by list and update endpoints.
+
+    Combines static provider metadata (name, label, models) with the
+    dynamic per-user configuration state from the database.
+
+    Attributes:
+        name:         Internal provider identifier (e.g. 'gemini', 'openai').
+        label:        Human-readable display name (e.g. 'Google Gemini').
+        models:       List of available model IDs for this provider.
+        configured:   True if an API key is stored (in DB or env var).
+        active:       True if this is the currently selected provider.
+        active_model: Model ID currently in use for this provider, or None.
+    """
     name: str
     label: str
     models: list[str]
@@ -52,7 +78,19 @@ class ProviderOut(BaseModel):
 
 @router.get("", response_model=list[ProviderOut])
 async def list_configured_providers(db: AsyncSession = Depends(get_db)):
-    """Returns all supported providers enriched with their DB config state."""
+    """
+    List all supported AI providers enriched with their DB config state.
+
+    For each provider, returns whether an API key is configured, whether it
+    is the active provider, and which model is currently selected. Gemini
+    models are fetched dynamically from the API when a key is available.
+
+    Args:
+        db: Injected async database session.
+
+    Returns:
+        list[ProviderOut]: All supported providers with their configuration status.
+    """
     settings = get_settings()
 
     # Try to get the Gemini API key for dynamic model fetching
@@ -94,8 +132,17 @@ async def list_configured_providers(db: AsyncSession = Depends(get_db)):
 @router.get("/models", response_model=list[ProviderOut])
 async def list_provider_models(db: AsyncSession = Depends(get_db)):
     """
-    Re-fetches models from providers (dynamic for Gemini) and returns the
-    updated list. Use this to refresh the model dropdown in the frontend.
+    Re-fetch models from providers and return the updated list.
+
+    Dynamically queries the Gemini API for available models (when a key is
+    configured). Other providers use their static model lists. Use this
+    endpoint to refresh the model dropdown in the frontend.
+
+    Args:
+        db: Injected async database session.
+
+    Returns:
+        list[ProviderOut]: All providers with their current (possibly dynamic) model lists.
     """
     settings = get_settings()
 
@@ -138,7 +185,22 @@ async def get_masked_key(
     provider_name: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns a masked version of the stored API key for the given provider."""
+    """
+    Return a masked version of the stored API key for the given provider.
+
+    Masking rule: shows first 6 + bullets + last 4 characters for keys longer
+    than 12 chars, or first 3 + bullets + last 3 for shorter keys.
+
+    Args:
+        provider_name: Internal provider name (e.g. 'gemini', 'openai').
+        db:            Injected async database session.
+
+    Returns:
+        dict: {'masked_key': 'AIzaSy...abcd'} or {'masked_key': None} if no key is stored.
+
+    Raises:
+        HTTPException(404): If the provider name is not recognised.
+    """
     known = {p["name"] for p in list_providers()}
     if provider_name not in known:
         raise HTTPException(status_code=404, detail=f"Unknown provider '{provider_name}'.")
@@ -171,8 +233,23 @@ async def update_provider(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Upsert provider configuration. Setting active=True deactivates all others.
-    Validates that the provider name is known.
+    Create or update a provider's configuration.
+
+    If active=True is set, all other providers are deactivated (single-active
+    constraint enforced at service layer). Validates API key format before
+    persisting.
+
+    Args:
+        provider_name: Internal provider name (e.g. 'gemini', 'openai').
+        body:          Fields to update (api_key, active_model, active).
+        db:            Injected async database session.
+
+    Returns:
+        ProviderOut: The updated provider enriched with static metadata.
+
+    Raises:
+        HTTPException(404): If the provider name is not recognised.
+        HTTPException(422): If the API key format is invalid.
     """
     known = {p["name"] for p in list_providers()}
     if provider_name not in known:

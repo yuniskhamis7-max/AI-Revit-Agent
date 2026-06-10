@@ -5,6 +5,20 @@ import { useSessionStore } from '@/store/sessionStore';
 import { revitApi } from '@/api/settings';
 import type { Session } from '@/types';
 
+/**
+ * SessionSidebar — left panel for managing chat sessions and Revit status.
+ *
+ * Renders:
+ * - Session list sorted by most recently updated (with click-to-select)
+ * - New session button
+ * - Inline rename and delete actions per session
+ * - Revit bridge connection status indicator with tool refresh button
+ * - Settings toggle button
+ *
+ * Collapses to a toggle button when sidebarOpen is false.
+ *
+ * @component
+ */
 export const SessionSidebar: React.FC = () => {
   const { sessions, activeSessionId, createSession, deleteSession, renameSession } = useSessions();
   const { revitStatus, sidebarOpen, toggleSidebar, setSettingsPanelOpen, revitToolCount, setRevitToolCount } = useUIStore();

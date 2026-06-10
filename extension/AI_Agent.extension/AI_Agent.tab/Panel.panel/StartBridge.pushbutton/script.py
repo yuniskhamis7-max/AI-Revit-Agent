@@ -1,4 +1,37 @@
 # -*- coding: utf-8 -*-
+"""pyRevit extension script for the AI-Revit Agent bridge.
+
+This module is executed by pyRevit when the user clicks the *StartBridge*
+push-button inside Revit.  It performs two responsibilities:
+
+1. **Dynamic Python Execution Router** – ``python_execution_router`` is a
+   closure that lives for the lifetime of the Revit session.  The C# bridge
+   server (``BridgeServer.cs``) stores a delegate to this function and
+   invokes it on Revit's main thread every time the AI agent calls a tool.
+   Inside the closure:
+
+   * ``tool_registry``  – list of JSON-schema dicts served via ``get_tools``.
+   * ``tool_functions`` – mapping of tool-name → callable.
+   * ``register_tool``  – decorator that populates both registries.
+   * Helper utilities (``get_base_point_offset``, uniqueness checks, datum
+     property applicators, etc.).
+   * Individual tool implementations (``fetch_levels``, ``create_grid``, …).
+
+   .. note::
+      All state **must** live inside the closure scope.  IronPython 2.7
+      garbage-collects module-level globals after the script finishes, so
+      only closure-captured variables survive for subsequent C# callbacks.
+
+2. **Event Registration & Server Toggle** – The bottom of the file either
+   starts or stops the ``BridgeServer`` depending on its current state,
+   allowing the same push-button to act as a toggle.
+
+Coordinates & units
+-------------------
+All tool coordinates are in **Revit internal feet**.  Where the AI agent
+sends values relative to the Project Base Point (PBP), the tools add the
+PBP offset before writing to the Revit model.
+"""
 import clr
 import os
 import sys
@@ -6,12 +39,19 @@ import sys
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import ExternalEvent
 
+#: Directory containing this script; used to locate the DLL and log files.
 current_dir   = os.path.dirname(__file__)
+#: Full filesystem path to the C# bridge DLL.
 dll_full_path = os.path.join(current_dir, "RevitAgentBridge.dll")
+#: Rotating debug log path (rotated at ``_MAX_LOG_SIZE``).
 _LOG_PATH     = os.path.join(current_dir, "debug_tool_errors.log")
+#: Maximum log file size in bytes before rotation (2 MB).
 _MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 MB rotation
+#: TCP port the bridge HTTP server listens on.
 _PORT         = 8080
+#: Minimum log severity that will be written to the log file.
 _LOG_LEVEL    = "INFO"
+#: Ordered severity levels used for filtering log output.
 _LOG_LEVEL_RANK = {"DEBUG": 0, "INFO": 1, "WARN": 2, "WARNING": 2, "ERROR": 3, "FATAL": 4}
 
 
@@ -38,12 +78,35 @@ from RevitAgentBridge import AgentExternalEventHandler, BridgeServer, BridgeRegi
 # =====================================================================
 
 def python_execution_router(*args):
-    """
-    Entry point called from C# on Revit's main thread.
-    Supports:
-        - python_execution_router(request_json_string) [Old DLL]
-        - python_execution_router(ui_app, request_json_string) [New DLL]
-    Parses the JSON payload, dispatches to the matching tool, returns JSON.
+    """Entry point called by the C# bridge on Revit's main thread.
+
+    This function is a **closure** – all tool registrations, helper
+    utilities, and the dispatch router are defined inside it so that
+    their state survives IronPython 2.7's module-level garbage collection.
+
+    Supports two calling signatures for backwards compatibility:
+
+    * **Legacy DLL**: ``python_execution_router(request_json_string)``
+    * **Current DLL**: ``python_execution_router(ui_app, request_json_string)``
+
+    The incoming JSON payload has the shape::
+
+        {"tool": "<tool_name>", "input": {<tool-specific params>}}
+
+    Special tool names:
+
+    * ``get_tools`` – returns the full tool registry (no Revit DB access).
+    * ``get_context`` – returns project metadata (levels, families, title).
+
+    All other names are dispatched to the matching registered callable.
+
+    Args:
+        *args: Either ``(request_json_string,)`` or
+            ``(ui_app, request_json_string)``.
+
+    Returns:
+        str: A JSON-encoded result dictionary with at least a ``status``
+        key (``"success"`` or ``"error"``).
     """
     import json
     import time
@@ -58,20 +121,25 @@ def python_execution_router(*args):
     # -----------------------------------------------------------------
     # IN-CLOSURE DEBUG LOG (GC-safe — local variables prevent GC issues)
     # -----------------------------------------------------------------
-    def _log_debug(tool_name, message, level="INFO", _lp=_LOG_PATH, _lm=_MAX_LOG_SIZE):
-        """Append a timestamped entry to the debug log file if severity >= _LOG_LEVEL."""
+    _log_level = "INFO"
+    _log_level_rank = {"DEBUG": 0, "INFO": 1, "WARN": 2, "WARNING": 2, "ERROR": 3, "FATAL": 4}
+    _log_file = os.path.join(os.path.dirname(__file__), "debug_tool_errors.log")
+    _log_max  = 2 * 1024 * 1024  # 2 MB rotation
+
+    def _log_debug(tool_name, message, level="INFO"):
+        """Append a timestamped entry to the debug log file if severity >= _log_level."""
         try:
-            req_rank = _LOG_LEVEL_RANK.get(level.upper(), 1)
-            cfg_rank = _LOG_LEVEL_RANK.get(_LOG_LEVEL.upper(), 1)
+            req_rank = _log_level_rank.get(level.upper(), 1)
+            cfg_rank = _log_level_rank.get(_log_level.upper(), 1)
             if req_rank < cfg_rank:
                 return
 
-            if os.path.exists(_lp) and os.path.getsize(_lp) > _lm:
-                backup = _lp + ".old"
+            if os.path.exists(_log_file) and os.path.getsize(_log_file) > _log_max:
+                backup = _log_file + ".old"
                 if os.path.exists(backup):
                     os.remove(backup)
-                os.rename(_lp, backup)
-            with open(_lp, "a") as f:
+                os.rename(_log_file, backup)
+            with open(_log_file, "a") as f:
                 ts = time.strftime("%Y-%m-%d %H:%M:%S")
                 f.write("[{}] [{:5s}] {}: {}\n".format(ts, level, tool_name, message))
         except Exception:
@@ -105,6 +173,20 @@ def python_execution_router(*args):
     # PROJECT BASE POINT HELPER
     # -----------------------------------------------------------------
     def get_base_point_offset(doc):
+        """Return the Project Base Point (PBP) offset as an ``(east, north, elevation)`` tuple.
+
+        Reads the non-shared ``BasePoint`` element in the active document and
+        extracts its East-West, North-South, and Elevation built-in parameters.
+
+        Args:
+            doc: The active ``Autodesk.Revit.DB.Document``.
+
+        Returns:
+            tuple: ``(east, north, elevation, error_message)`` where each
+            numeric component is a ``float`` in feet.  ``error_message`` is an
+            empty string on success, or a human-readable description of what
+            went wrong (in which case the numeric values are all ``0.0``).
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, BasePoint, BuiltInParameter
         last_error = ""
         try:
@@ -129,6 +211,17 @@ def python_execution_router(*args):
     # UNIQUE NAME AND VIEW GENERATION HELPERS
     # -----------------------------------------------------------------
     def is_grid_name_unique(doc, name, exclude_id=None):
+        """Check whether *name* is already used by another Grid element.
+
+        Args:
+            doc: The active Revit ``Document``.
+            name (str): The grid name to test.
+            exclude_id (str, optional): A Grid ``UniqueId`` to exclude from
+                the check (useful when renaming an existing grid).
+
+        Returns:
+            bool: ``True`` if no other grid uses *name* (case-insensitive).
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, Grid
         collector = FilteredElementCollector(doc).OfClass(Grid)
         for g in collector:
@@ -139,6 +232,17 @@ def python_execution_router(*args):
         return True
 
     def is_level_name_unique(doc, name, exclude_id=None):
+        """Check whether *name* is already used by another Level element.
+
+        Args:
+            doc: The active Revit ``Document``.
+            name (str): The level name to test.
+            exclude_id (str, optional): A Level ``UniqueId`` to exclude from
+                the check (useful when renaming an existing level).
+
+        Returns:
+            bool: ``True`` if no other level uses *name* (case-insensitive).
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, Level
         collector = FilteredElementCollector(doc).OfClass(Level)
         for l in collector:
@@ -149,6 +253,17 @@ def python_execution_router(*args):
         return True
 
     def get_view_family_type(doc, view_family):
+        """Return the first ``ViewFamilyType`` matching *view_family*.
+
+        Args:
+            doc: The active Revit ``Document``.
+            view_family: A ``ViewFamily`` enum value (e.g.
+                ``ViewFamily.FloorPlan``, ``ViewFamily.CeilingPlan``).
+
+        Returns:
+            ViewFamilyType or None: The matching type, or ``None`` if no
+            type in the document belongs to the requested family.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, ViewFamilyType
         collector = FilteredElementCollector(doc).OfClass(ViewFamilyType)
         for vft in collector:
@@ -157,6 +272,18 @@ def python_execution_router(*args):
         return None
 
     def has_plan_view(doc, level_id, view_family):
+        """Check whether a plan view of *view_family* already exists for *level_id*.
+
+        Args:
+            doc: The active Revit ``Document``.
+            level_id: The ``ElementId`` of the level to check.
+            view_family: A ``ViewFamily`` enum value.
+
+        Returns:
+            bool: ``True`` if at least one ``ViewPlan`` whose generating
+            level matches *level_id* and whose ``ViewFamilyType`` belongs
+            to *view_family* exists in the document.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, ViewPlan
         collector = FilteredElementCollector(doc).OfClass(ViewPlan)
         for vp in collector:
@@ -167,6 +294,26 @@ def python_execution_router(*args):
         return False
 
     def apply_datum_properties(doc, ui_app, datum, params, errors=None):
+        """Apply shared datum-element properties to a Grid or Level.
+
+        Handles Scope Box assignment, 3D-extent maximisation, datum extent
+        type (2D / 3D), bubble visibility, start/end offsets (linear and arc),
+        and propagation to parallel views.
+
+        Args:
+            doc: The active Revit ``Document``.
+            ui_app: The ``UIApplication`` (may be ``None`` when using the
+                legacy DLL signature).
+            datum: The ``DatumPlane`` element (``Grid`` or ``Level``) to
+                modify.  **Must be inside an open transaction.**
+            params (dict): Tool-input dictionary that may contain any of:
+                ``scope_box_id``, ``maximize_3d_extents``,
+                ``datum_extent_type``, ``target_view_id``,
+                ``show_bubble_at_start``, ``show_bubble_at_end``,
+                ``start_offset``, ``end_offset``, ``propagate_to_views``.
+            errors (list, optional): If provided, non-fatal error strings
+                are appended here instead of raising exceptions.
+        """
         from Autodesk.Revit.DB import BuiltInParameter, ElementId, DatumEnds, DatumExtentType
         from System.Collections.Generic import HashSet
         
@@ -302,6 +449,20 @@ def python_execution_router(*args):
     # SYSTEM TOOL: get_context (internal, not in registered list)
     # -----------------------------------------------------------------
     def tool_get_context(doc, tool_input):
+        """Return project context metadata (internal system tool, not registered).
+
+        Collects the document title, all levels (name, id, elevation relative
+        to PBP), and all loaded family symbols grouped by family name.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Unused – present for interface consistency.
+
+        Returns:
+            dict: ``{"status": "success", "document_title": str,
+            "levels": [...], "families": {...}}`` with an optional
+            ``warnings`` key.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, Level, FamilySymbol
         pbp_x, pbp_y, pbp_z, pbp_err = get_base_point_offset(doc)
         levels_list   = []
@@ -382,6 +543,17 @@ def python_execution_router(*args):
         }
     )
     def tool_fetch_project_info(doc, tool_input):
+        """Return document title and file path of the active project.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Unused.
+
+        Returns:
+            dict: ``{"status": "success", "document_title": str,
+            "file_path": str}`` with optional ``warnings`` if the file
+            path could not be read.
+        """
         file_path = ""
         file_path_error = ""
         try:
@@ -428,6 +600,22 @@ def python_execution_router(*args):
         }
     )
     def tool_fetch_levels(doc, tool_input):
+        """Return detailed information about every level in the project.
+
+        For each level the response includes: name, UniqueId, elevation
+        (feet, relative to PBP), 3D curve extents, structural flag,
+        scope box, level type, and (when a target view is available)
+        view-specific 2D extents, offsets, and bubble visibility.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): May contain ``target_view_id`` (str) to
+                query view-specific datum details.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "levels": [...]}``
+            with optional ``warnings`` or ``errors`` lists.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, Level, DatumEnds, DatumExtentType, BuiltInParameter, ElementId, BoundingBoxXYZ, Outline
         pbp_x, pbp_y, pbp_z, pbp_err = get_base_point_offset(doc)
         errors = []
@@ -617,6 +805,22 @@ def python_execution_router(*args):
         }
     )
     def tool_fetch_grids(doc, tool_input):
+        """Return detailed information about every grid in the project.
+
+        For each grid the response includes: name, UniqueId, start/end
+        coordinates (Revit internal feet), linear/arc flag, arc geometry
+        (if curved), scope box, grid type, and view-specific 2D extents,
+        offsets, and bubble visibility when a target view is available.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): May contain ``target_view_id`` (str) to
+                query view-specific datum details.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "coordinate_reference":
+            "Internal (Revit)", "grids": [...]}`` with optional ``warnings``.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, Grid, DatumEnds, DatumExtentType, BuiltInParameter, ElementId, Arc, Line
         import math
         errors = []
@@ -804,6 +1008,20 @@ def python_execution_router(*args):
         }
     )
     def tool_fetch_families(doc, tool_input):
+        """Return all loaded family symbols grouped by family name.
+
+        Optionally filters by category to reduce payload size on large
+        projects.  Deduplicates (family, type) pairs.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): May contain ``category_filter`` (str) –
+                a category name such as ``"Doors"`` or ``"Furniture"``.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "families": {family_name:
+            [type_names, ...]}}`` with optional ``warnings``/``message``.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, BuiltInCategory
         
         # Optional category filter for performance
@@ -911,6 +1129,16 @@ def python_execution_router(*args):
         }
     )
     def tool_fetch_sheets(doc, tool_input):
+        """Return all drawing sheets in the project.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Unused.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "sheets": [{"number":
+            str, "name": str, "id": str}, ...]}`` with optional ``warnings``.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, ViewSheet
         sheets_list = []
         errors = []
@@ -995,6 +1223,22 @@ def python_execution_router(*args):
         }
     )
     def tool_place_family(doc, tool_input):
+        """Place a family symbol instance at a PBP-relative coordinate.
+
+        Looks up the symbol by ``family_name`` + ``type_name``, activates it
+        if necessary, and creates a new instance at the specified location on
+        the given level.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``family_name``, ``type_name``,
+                ``level_id``, ``x``, ``y``, ``z`` (all coordinates in feet,
+                relative to the Project Base Point).
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str,
+            "element_id": str}`` on success.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, Level, FamilySymbol, Transaction, XYZ
         import Autodesk.Revit.DB.Structure
 
@@ -1196,6 +1440,25 @@ def python_execution_router(*args):
         }
     )
     def tool_create_grid(doc, tool_input):
+        """Create a new reference gridline (linear or arc).
+
+        Builds the curve geometry from the supplied coordinates, creates
+        the ``Grid`` element, maximises its 3D extents, optionally applies
+        a grid type and datum properties, and pins the element.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``name``.  Linear grids need
+                ``start_x/y/z`` + ``end_x/y/z``; arc grids additionally
+                need either ``arc_point_x/y/z`` (3-point arc) or
+                ``center_x/y`` + ``radius`` + ``start_angle`` +
+                ``end_angle``.  Optional datum properties are forwarded to
+                :func:`apply_datum_properties`.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str,
+            "element_id": str}`` with optional ``warnings``.
+        """
         from Autodesk.Revit.DB import Transaction, XYZ, Line, Arc, Grid
         grid_name = tool_input.get("name")
         errors = []
@@ -1414,6 +1677,22 @@ def python_execution_router(*args):
         }
     )
     def tool_modify_grid(doc, tool_input):
+        """Modify an existing grid's geometry, name, or datum properties.
+
+        Uses a three-strategy approach for geometry changes:
+        (1) direct ``LocationCurve`` assignment, (2) ``MoveElement``
+        transform, (3) delete-and-recreate as a last resort.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``grid_id``.  Any other keys
+                (``name``, curve coordinates, datum properties) are
+                optional and only applied when present.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str,
+            "element_id": str}`` with optional ``warnings``.
+        """
         from Autodesk.Revit.DB import (
             Transaction, XYZ, Line, Arc, Grid, BuiltInParameter, ElementId,
             DatumExtentType, DatumEnds, ElementTransformUtils
@@ -1616,6 +1895,17 @@ def python_execution_router(*args):
         }
     )
     def tool_delete_grid(doc, tool_input):
+        """Delete a grid element by UniqueId.
+
+        Unpins the grid before deletion to avoid Revit rejection.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``grid_id`` (str).
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str}``.
+        """
         from Autodesk.Revit.DB import Transaction, Grid
         grid_id = tool_input["grid_id"]
         
@@ -1739,6 +2029,27 @@ def python_execution_router(*args):
         }
     )
     def tool_create_level(doc, tool_input):
+        """Create a new horizontal level with optional associated plan views.
+
+        Elevation is PBP-relative; the tool adds the PBP offset before
+        calling ``Level.Create``.  Optionally generates Floor Plan,
+        Ceiling Plan, and/or Structural Plan views and applies a view
+        template.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``name`` (str) and
+                ``elevation`` (float, feet).  Optional keys:
+                ``is_structural``, ``create_floor_plan``,
+                ``create_ceiling_plan``, ``create_structural_plan``,
+                ``view_template_id``, ``level_type_id``, and datum
+                property keys forwarded to
+                :func:`apply_datum_properties`.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str,
+            "element_id": str}`` with optional ``warnings``.
+        """
         from Autodesk.Revit.DB import Transaction, Level, BuiltInParameter, ViewPlan, ViewFamily
         level_name = tool_input.get("name")
         elevation = float(tool_input.get("elevation", 0.0))
@@ -1927,6 +2238,22 @@ def python_execution_router(*args):
         }
     )
     def tool_modify_level(doc, tool_input):
+        """Modify an existing level's properties, elevation, or name.
+
+        Can also create missing associated plan views (Floor Plan, RCP,
+        Structural Plan) and apply a view template.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``level_id`` (str).  All
+                other keys (``name``, ``elevation``, ``is_structural``,
+                ``create_*``, ``view_template_id``, datum keys) are
+                optional.
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str,
+            "element_id": str}`` with optional ``warnings``.
+        """
         from Autodesk.Revit.DB import Transaction, Level, BuiltInParameter, ViewPlan, ViewFamily
         level_id = tool_input["level_id"]
         errors = []
@@ -2056,6 +2383,19 @@ def python_execution_router(*args):
         }
     )
     def tool_delete_level(doc, tool_input):
+        """Delete a level and all its dependent elements (views, hosted elements).
+
+        Unpins the level and each dependent element before deletion.
+        Dependent elements that cannot be deleted are reported as warnings.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``level_id`` (str).
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str}``
+            with optional ``warnings``.
+        """
         from Autodesk.Revit.DB import Transaction, Level, FilteredElementCollector, ViewPlan, ElementId
         from System.Collections.Generic import List as NetList
         level_id = tool_input["level_id"]
@@ -2143,6 +2483,17 @@ def python_execution_router(*args):
         }
     )
     def tool_create_sheet(doc, tool_input):
+        """Create a new drawing sheet using the first available Title Block.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Must contain ``sheet_number`` (str) and
+                ``sheet_name`` (str).
+
+        Returns:
+            dict: ``{"status": "success"|"error", "message": str,
+            "element_id": str, "warnings": list|None}``.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, ViewSheet, Transaction
         sheet_number = tool_input.get("sheet_number", "A101")
         sheet_name   = tool_input.get("sheet_name",   "UNNAMED SHEET")
@@ -2189,6 +2540,21 @@ def python_execution_router(*args):
         }
     )
     def tool_fetch_level_extents_detailed(doc, tool_input):
+        """Scan all elevation/section views to find global level curve bounds.
+
+        Iterates every level in every non-template elevation/section view
+        and collects the minimum and maximum X/Y coordinates of the model
+        datum curves.
+
+        Args:
+            doc: The active Revit ``Document``.
+            tool_input (dict): Unused.
+
+        Returns:
+            dict: ``{"status": "success", "x_min": float|None,
+            "x_max": float|None, "y_min": float|None,
+            "y_max": float|None}``.
+        """
         from Autodesk.Revit.DB import FilteredElementCollector, Level, View, ViewType, DatumExtentType
         levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
         views = FilteredElementCollector(doc).OfClass(View).ToElements()
@@ -2226,6 +2592,9 @@ def python_execution_router(*args):
 
     # -----------------------------------------------------------------
     # DISPATCH ROUTER
+    # Parses the incoming JSON payload, selects the matching tool from
+    # the registry (or handles the special ``get_tools`` / ``get_context``
+    # actions), executes it, logs the result, and returns JSON.
     # -----------------------------------------------------------------
     try:
         payload    = json.loads(request_json_string)

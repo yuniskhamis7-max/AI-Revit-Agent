@@ -5,6 +5,22 @@ import { useSessionStore } from '@/store/sessionStore';
 import { MessageBubble } from './MessageBubble';
 import type { ChatMessage } from '@/types';
 
+/**
+ * ChatWindow — the main conversation interface.
+ *
+ * Renders:
+ * - An empty state when no session is selected
+ * - Starter prompt buttons when a session has no messages
+ * - The message list (via MessageBubble) when messages exist
+ * - A text input area with send/stop buttons
+ *
+ * Handles:
+ * - Auto-scrolling to the latest message
+ * - Enter-to-send (Shift+Enter for newline)
+ * - Toggling between Send and Stop buttons during streaming
+ *
+ * @component
+ */
 export const ChatWindow: React.FC = () => {
   const { messages, isStreaming } = useMessageStore();
   const { activeSessionId } = useSessionStore();

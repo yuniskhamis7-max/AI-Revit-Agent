@@ -34,6 +34,13 @@ router = APIRouter(tags=["settings"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SettingsPayload(BaseModel):
+    """
+    Request/response body for bulk upserting application settings.
+
+    Attributes:
+        settings: Key-value dictionary of setting names to string values.
+                  Keys are arbitrary identifiers (e.g. 'theme', 'sidebar_width').
+    """
     settings: dict[str, str]
 
 
@@ -43,12 +50,34 @@ class SettingsPayload(BaseModel):
 
 @router.get("/api/settings", response_model=dict)
 async def get_settings_all(db: AsyncSession = Depends(get_db)):
+    """
+    Retrieve all stored application settings as a flat dictionary.
+
+    Args:
+        db: Injected async database session.
+
+    Returns:
+        dict[str, str]: All settings as {key: value} pairs.
+    """
     result = await db.execute(select(AppSetting))
     return {row.key: row.value for row in result.scalars().all()}
 
 
 @router.put("/api/settings", response_model=dict)
 async def upsert_settings(body: SettingsPayload, db: AsyncSession = Depends(get_db)):
+    """
+    Bulk insert or update application settings.
+
+    Existing keys are updated in place; new keys are created. Keys not
+    present in the payload are left unchanged (not deleted).
+
+    Args:
+        body: Dictionary of settings to upsert.
+        db:   Injected async database session.
+
+    Returns:
+        dict[str, str]: The settings that were written.
+    """
     result = await db.execute(select(AppSetting))
     existing = {row.key: row for row in result.scalars().all()}
 
@@ -65,8 +94,17 @@ async def upsert_settings(body: SettingsPayload, db: AsyncSession = Depends(get_
 @router.get("/api/revit/status")
 async def revit_status():
     """
-    Lightweight health check with auto-recovery.
-    When the bridge reconnects after being down, automatically re-discovers tools.
+    Lightweight Revit bridge health check with automatic tool re-discovery.
+
+    Checks whether the C# bridge is reachable. When the bridge transitions
+    from disconnected to connected, automatically re-discovers available tools
+    to recover from outages without manual intervention.
+
+    Returns:
+        dict: {
+            'connected': bool — True if bridge responded successfully,
+            'tool_count': int — Number of tools currently in the registry.
+        }
     """
     global _bridge_was_connected
     connected = await check_bridge_health()
@@ -88,7 +126,16 @@ async def revit_status():
 async def refresh_tools():
     """
     Force a fresh tool discovery from the Revit bridge.
-    Useful when the bridge was restarted or tools were added/removed.
+
+    Useful when the bridge was restarted, tools were added or removed in Revit,
+    or the cached registry is suspected to be stale.
+
+    Returns:
+        dict: {
+            'status': 'success' | 'error',
+            'tool_count': int — Number of tools discovered,
+            'tools': list[str] — Names of discovered tools (on success).
+        }
     """
     try:
         schemas = await discover_tools()

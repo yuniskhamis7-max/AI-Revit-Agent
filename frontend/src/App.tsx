@@ -22,6 +22,27 @@ const POLL_CONNECTED_MS    = 10_000;
 const POLL_DISCONNECTED_MS = 5_000;
 const POLL_MAX_MS          = 60_000;
 
+/**
+ * App — root application component.
+ *
+ * Composes the full application layout:
+ * - SessionSidebar (left panel)
+ * - Header with session title and ProviderSelector
+ * - ChatWindow (wrapped in ChatErrorBoundary)
+ * - SettingsPanel (slide-out drawer)
+ * - ApprovalModal (human-in-the-loop overlay)
+ *
+ * On mount:
+ * 1. Fetches configured providers from the backend
+ * 2. Starts polling the Revit bridge health status with exponential backoff
+ *
+ * Polling strategy:
+ * - Connected:    polls every 10 seconds
+ * - Disconnected: polls starting at 5 seconds, doubling up to 60 seconds max
+ * - Reconnection resets the backoff delay
+ *
+ * @component
+ */
 const App: React.FC = () => {
   const { sidebarOpen, toggleSidebar, setRevitStatus, setRevitToolCount } = useUIStore();
   const { setProviders } = useProviderStore();

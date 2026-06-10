@@ -28,6 +28,7 @@ from providers.base import AIProvider, SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 5
+"""Maximum number of retry attempts for rate-limited (429) Gemini API calls."""
 
 # Ordered list of models surfaced in the frontend dropdown (fallback if API unavailable)
 GEMINI_MODELS = [
@@ -64,6 +65,19 @@ def fetch_gemini_models(api_key: str) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_retry_delay(error: Exception) -> float:
+    """
+    Parse the retry delay from a Gemini rate-limit error message.
+
+    Gemini 429 errors include a retryDelay field (e.g. 'retryDelay: 5.2s').
+    This function extracts the numeric value. Falls back to 5.0 seconds
+    if parsing fails.
+
+    Args:
+        error: The exception whose string representation is searched.
+
+    Returns:
+        float: Seconds to wait before retrying.
+    """
     try:
         match = re.search(r"retryDelay['\"]?\s*[:=]\s*['\"]?([\d.]+)s", str(error))
         if match:
@@ -74,7 +88,19 @@ def _extract_retry_delay(error: Exception) -> float:
 
 
 def _build_function_declarations(tool_schemas: list[dict]) -> list[types.FunctionDeclaration]:
-    """Converts raw bridge tool schemas into Gemini FunctionDeclaration objects."""
+    """
+    Convert raw bridge tool schemas into Gemini FunctionDeclaration objects.
+
+    Recursively builds Gemini Schema objects for nested parameter types
+    (including arrays). If a tool schema contains an 'agent_instructions' field,
+    it is appended to the description as a BEFORE CALLING note.
+
+    Args:
+        tool_schemas: Raw tool definition dicts from the Revit bridge.
+
+    Returns:
+        list[types.FunctionDeclaration]: Gemini-compatible function declarations.
+    """
 
     def _prop(prop_def: dict) -> types.Schema:
         prop_type = prop_def.get("type", "string").upper()
@@ -116,14 +142,44 @@ def _build_function_declarations(tool_schemas: list[dict]) -> list[types.Functio
 # ─────────────────────────────────────────────────────────────────────────────
 
 class GeminiProvider(AIProvider):
+    """
+    Google Gemini provider adapter.
+
+    Wraps the google-genai SDK and normalises its synchronous response into
+    the provider-agnostic async event stream. Supports rate-limit retry with
+    exponential backoff and Gemini 2.5 thought signatures for multi-turn.
+
+    Attributes:
+        name:             Provider identifier ('gemini').
+        available_models: List of model IDs surfaced in the frontend dropdown.
+    """
     name = "gemini"
     available_models = GEMINI_MODELS
 
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
+        """
+        Initialise the Gemini provider with an API key and model.
+
+        Args:
+            api_key: Google AI Studio API key (starts with 'AI').
+            model:   Model ID to use for inference. Defaults to 'gemini-2.5-flash'.
+        """
         self._client = genai.Client(api_key=api_key)
+        """Internal google-genai client instance."""
+
         self._model = model
+        """Active model ID for this provider instance."""
 
     def validate_api_key(self, api_key: str) -> bool:
+        """
+        Check that the API key has the expected Gemini prefix.
+
+        Args:
+            api_key: Key to validate.
+
+        Returns:
+            bool: True if the key is non-empty and starts with 'AI'.
+        """
         return bool(api_key and api_key.startswith("AI"))
 
     async def stream_agent_turn(
@@ -194,7 +250,24 @@ class GeminiProvider(AIProvider):
         yield {"type": "done"}
 
     def _send_with_retry(self, contents, config):
-        """Synchronous Gemini call with 429 retry logic (runs in executor)."""
+        """
+        Execute a synchronous Gemini generate_content call with 429 retry logic.
+
+        Runs inside a thread-pool executor (called from stream_agent_turn).
+        On RESOURCE_EXHAUSTED errors, waits for the retry delay specified in
+        the error message and retries up to _MAX_RETRIES times.
+
+        Args:
+            contents: List of Gemini Content objects (conversation history).
+            config:   GenerateContentConfig with system prompt, tools, and temperature.
+
+        Returns:
+            The raw Gemini GenerateContentResponse.
+
+        Raises:
+            RuntimeError: If rate limiting persists after all retries.
+            ClientError:  For non-429 API errors.
+        """
         # Use generate_content (stateless) to stay compatible with our own
         # multi-turn loop managed by agent.py
         for attempt in range(_MAX_RETRIES):
@@ -220,9 +293,23 @@ class GeminiProvider(AIProvider):
 
 def _to_gemini_contents(messages: list[dict]) -> list:
     """
-    Converts the provider-agnostic message list to Gemini Content objects.
+    Convert provider-agnostic messages to Gemini Content objects.
 
-    Supported roles: 'user', 'assistant', 'tool'
+    Maps the unified message format (used across all providers) to Gemini's
+    Content/Part structure. Handles text, function calls with thought signatures,
+    and function responses.
+
+    Args:
+        messages: List of message dicts with keys: role ('user'|'assistant'|'tool'),
+                  content (str), and optionally tool_calls / name / tool_call_id.
+
+    Returns:
+        list[types.Content]: Gemini-native content objects for the API call.
+
+    Supported roles:
+        'user'      — mapped to Gemini role='user' with text Part.
+        'assistant' — mapped to Gemini role='model' with text + function_call Parts.
+        'tool'      — mapped to Gemini role='user' with function_response Part.
     """
     contents = []
     for msg in messages:

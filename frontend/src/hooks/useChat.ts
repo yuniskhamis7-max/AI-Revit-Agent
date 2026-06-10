@@ -14,13 +14,28 @@ import type { SSEEvent, ToolCall, ChatMessage } from '@/types';
  *  - Dispatching each SSE event type into the focused Zustand stores
  *  - Approval gate (approve / reject tool calls)
  *  - Stream cancellation via AbortController
+ *
+ * @returns {{ sendMessage, approve, cancelStream }}
+ *   sendMessage   — Send a user message and start the SSE stream.
+ *   approve       — Approve or reject the currently pending tool call.
+ *   cancelStream  — Abort the in-flight SSE stream and clear streaming state.
  */
 export function useChat() {
+  /** Ref to the current AbortController for cancelling in-flight streams. */
   const abortRef = useRef<AbortController | null>(null);
 
   // Cancel any in-flight stream on unmount
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
+  /**
+   * Send a user message to the backend and process the SSE response stream.
+   *
+   * Adds the user message optimistically to the UI, opens the SSE stream,
+   * and dispatches each incoming event to the appropriate store. On error,
+   * clears streaming state and adds an error message.
+   *
+   * @param userText - The user's input text (trimmed before sending).
+   */
   const sendMessage = useCallback(async (userText: string) => {
     const { activeSessionId } = useSessionStore.getState();
     const { activeProvider, activeModel } = useProviderStore.getState();
@@ -66,6 +81,14 @@ export function useChat() {
     }
   }, []);
 
+  /**
+   * Approve or reject the currently pending tool call.
+   *
+   * Dismisses the approval modal immediately, updates the tool call card status,
+   * and sends the decision to the backend to unblock the paused agent.
+   *
+   * @param approved - True to allow execution, False to reject.
+   */
   const approve = useCallback(async (approved: boolean) => {
     const { pendingApproval, setPendingApproval } = useApprovalStore.getState();
     if (!pendingApproval) return;
@@ -88,6 +111,10 @@ export function useChat() {
     }
   }, []);
 
+  /**
+   * Cancel the in-flight SSE stream and clear streaming UI state.
+   * Safe to call even if no stream is active.
+   */
   const cancelStream = useCallback(() => {
     abortRef.current?.abort();
     useMessageStore.getState().clearStreamingState();
@@ -100,6 +127,16 @@ export function useChat() {
 // SSE event dispatcher
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * SSE event dispatcher — routes each event type to the appropriate store action.
+ *
+ * Called synchronously for every event yielded by the backend SSE stream.
+ * Handles text accumulation, tool call lifecycle, agent thoughts, errors,
+ * and stream finalisation.
+ *
+ * @param event     - Parsed SSE event from the backend.
+ * @param sessionId - UUID of the session this stream belongs to.
+ */
 function _handleSSEEvent(event: SSEEvent, sessionId: string) {
   const msg      = useMessageStore.getState();
   const approval = useApprovalStore.getState();

@@ -4,6 +4,20 @@ import { useProviderStore } from '@/store/providerStore';
 import { providersApi } from '@/api/settings';
 import type { Provider } from '@/types';
 
+/**
+ * SettingsPanel — slide-out drawer for managing API keys.
+ *
+ * Renders:
+ * - A backdrop overlay that closes the panel on click
+ * - A card per provider with: API key input, visibility toggle, save button
+ * - Masked key display for already-configured providers (fetch on eye click)
+ * - Success/error status messages after save attempts
+ *
+ * Automatically refreshes the provider list (including dynamic Gemini models)
+ * when the panel is opened.
+ *
+ * @component
+ */
 export const SettingsPanel: React.FC = () => {
   const { settingsPanelOpen, setSettingsPanelOpen } = useUIStore();
   const { providers, setProviders } = useProviderStore();

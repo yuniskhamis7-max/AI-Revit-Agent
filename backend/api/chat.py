@@ -42,6 +42,17 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
+    """
+    Request body for initiating an agent conversation turn.
+
+    Attributes:
+        session_id: UUID of the session this message belongs to.
+        message:    The user's natural language input text.
+        provider:   Optional override for the AI provider (e.g. 'gemini').
+                    Falls back to the active provider stored in the DB.
+        model:      Optional override for the model ID (e.g. 'gemini-2.5-flash').
+                    Falls back to the provider's active_model in the DB.
+    """
     session_id: str
     message: str
     provider: str | None = None   # Falls back to active provider in DB
@@ -62,6 +73,15 @@ class ChatRequest(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
+    """
+    Request body for approving or rejecting a pending tool call.
+
+    Attributes:
+        session_id: UUID of the session whose agent is paused for approval.
+        approval_id: UUID of the specific tool call to approve/reject.
+                     Must match the gate's pending_tool_id.
+        approved:   True to allow execution, False to reject.
+    """
     session_id: str
     approval_id: str
     approved: bool

@@ -21,22 +21,52 @@ ANTHROPIC_MODELS = [
     "claude-haiku-3-5",
     "claude-3-5-sonnet-latest",
 ]
+"""Static list of Anthropic model IDs surfaced in the frontend dropdown."""
 
 
 class AnthropicProvider(AIProvider):
+    """
+    Anthropic Claude provider adapter.
+
+    Wraps the anthropic SDK and normalises its streaming response into the
+    provider-agnostic event format consumed by the agent service. Tool calls
+    are collected after the stream completes (not streamed incrementally).
+
+    Attributes:
+        name:             Provider identifier ('anthropic').
+        available_models: List of Claude model IDs available for selection.
+    """
     name = "anthropic"
     available_models = ANTHROPIC_MODELS
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-4-5") -> None:
+        """
+        Initialise the Anthropic provider with an API key and model.
+
+        Args:
+            api_key: Anthropic API key (starts with 'sk-ant-').
+            model:   Model ID to use. Defaults to 'claude-sonnet-4-5'.
+        """
         try:
             import anthropic
             self._client = anthropic.AsyncAnthropic(api_key=api_key)
+            """Internal async Anthropic client, or None if SDK is not installed."""
         except ImportError:
             self._client = None
             logger.warning("anthropic package not installed. Anthropic provider unavailable.")
         self._model = model
+        """Active model ID for this provider instance."""
 
     def validate_api_key(self, api_key: str) -> bool:
+        """
+        Check that the API key has the expected Anthropic prefix.
+
+        Args:
+            api_key: Key to validate.
+
+        Returns:
+            bool: True if the key is non-empty and starts with 'sk-ant-'.
+        """
         return bool(api_key and api_key.startswith("sk-ant-"))
 
     async def stream_agent_turn(
@@ -45,6 +75,21 @@ class AnthropicProvider(AIProvider):
         tool_schemas: list[dict],
         system_prompt: str,
     ) -> AsyncGenerator[dict, None]:
+        """
+        Run one Anthropic model inference turn and yield normalised events.
+
+        Converts messages and tools to Anthropic format, streams text deltas,
+        then collects the final message for tool use extraction. Tool calls
+        are yielded after the stream ends.
+
+        Args:
+            messages:      Provider-agnostic conversation history.
+            tool_schemas:  Raw tool definitions from the bridge.
+            system_prompt: System instruction for the model.
+
+        Yields:
+            dict: Normalised events — text_delta, tool_call, error, or done.
+        """
         if self._client is None:
             yield {"type": "error", "content": "anthropic package not installed."}
             yield {"type": "done"}
@@ -91,7 +136,18 @@ class AnthropicProvider(AIProvider):
 
 
 def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
-    """Convert provider-agnostic messages to Anthropic format."""
+    """
+    Convert provider-agnostic messages to Anthropic Messages API format.
+
+    Anthropic uses a content-block structure for assistant messages (text + tool_use)
+    and maps tool results as user messages with tool_result content blocks.
+
+    Args:
+        messages: List of dicts with keys: role, content, and optionally tool_calls / tool_call_id.
+
+    Returns:
+        list[dict]: Anthropic-native message dicts ready for the Messages API.
+    """
     result = []
     for msg in messages:
         role = msg["role"]
@@ -127,7 +183,19 @@ def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
 
 
 def _to_anthropic_tools(tool_schemas: list[dict]) -> list[dict]:
-    """Convert raw bridge schemas to Anthropic tool format."""
+    """
+    Convert raw bridge tool schemas to Anthropic tool format.
+
+    Anthropic uses 'input_schema' instead of 'parameters', and the tool name
+    must be unique. If agent_instructions are present, they are appended to
+    the description as a BEFORE CALLING note.
+
+    Args:
+        tool_schemas: Raw tool definition dicts from the Revit bridge.
+
+    Returns:
+        list[dict]: Anthropic-native tool dicts with name, description, input_schema.
+    """
     result = []
     for s in tool_schemas:
         description = s["description"]

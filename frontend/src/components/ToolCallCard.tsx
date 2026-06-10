@@ -1,10 +1,29 @@
 import React, { useState } from 'react';
 import type { ToolCall } from '@/types';
 
+/**
+ * Props for the ToolCallCard component.
+ *
+ * @property toolCall - The ToolCall object containing name, args, status, and result.
+ */
 interface ToolCallCardProps {
   toolCall: ToolCall;
 }
 
+/**
+ * ToolCallCard — collapsible card displaying a single tool call.
+ *
+ * Shows:
+ * - Tool name with a read (magnifier) or write (wrench) icon
+ * - Status badge (Ready, Awaiting Approval, Executing, Success, Rejected)
+ * - Expandable body with formatted JSON arguments and result
+ *
+ * Visually distinguishes read tools (fetch_*, get_*) from write tools
+ * via different card colour classes.
+ *
+ * @component
+ * @param props.toolCall - The tool call to render.
+ */
 export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const isRead = toolCall.name.startsWith('fetch_') || toolCall.name.startsWith('get_');

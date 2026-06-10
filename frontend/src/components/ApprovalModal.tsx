@@ -2,6 +2,17 @@ import React from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useApprovalStore } from '@/store/approvalStore';
 
+/**
+ * ApprovalModal — human-in-the-loop confirmation dialog for write tool calls.
+ *
+ * Appears when the agent requests to execute an action tool (e.g. create_grid,
+ * delete_level) that requires human approval. Displays the tool name and
+ * formatted arguments, with Approve and Reject buttons.
+ *
+ * Renders nothing when no approval is pending.
+ *
+ * @component
+ */
 export const ApprovalModal: React.FC = () => {
   const { pendingApproval } = useApprovalStore();
   const { approve } = useChat();

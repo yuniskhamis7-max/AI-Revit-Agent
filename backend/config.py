@@ -16,6 +16,33 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """
+    Application-wide configuration loaded from .env and environment variables.
+
+    All settings are validated and typed via Pydantic. The .env file is read
+    from the backend/ directory. Unknown environment variables are silently
+    ignored (extra="ignore").
+
+    Attributes:
+        development_mode: Master toggle for developer ergonomics. When True,
+            tools are auto-approved, CORS is open, logging is DEBUG, and bridge
+            failures are soft. Set to False for production deployments.
+        gemini_api_key:   API key for Google Gemini provider.
+        openai_api_key:   API key for OpenAI provider.
+        anthropic_api_key: API key for Anthropic Claude provider.
+        groq_api_key:     API key for Groq LPU provider.
+        openrouter_api_key: API key for OpenRouter meta-provider.
+        default_provider: Fallback provider name when none is persisted in DB.
+        default_model:    Fallback model ID when none is persisted in DB.
+        agent_max_turns:  Maximum number of agent loop iterations per user turn.
+            Prevents infinite loops on complex multi-step automations.
+        revit_bridge_host: Hostname/IP of the C# Revit bridge server.
+        revit_bridge_port: TCP port the Revit bridge listens on.
+        backend_host:     Host address the FastAPI backend binds to.
+        backend_port:     TCP port the FastAPI backend listens on.
+        database_path:    Relative path (from backend/) to the SQLite database file.
+    """
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent / ".env",
         env_file_encoding="utf-8",
@@ -32,47 +59,95 @@ class Settings(BaseSettings):
 
     # ── AI Provider Keys ─────────────────────────────────────────────────────
     gemini_api_key: str = ""
+    """Google Gemini API key. Empty string means not configured via env."""
+
     openai_api_key: str = ""
+    """OpenAI API key. Empty string means not configured via env."""
+
     anthropic_api_key: str = ""
+    """Anthropic Claude API key. Empty string means not configured via env."""
+
     groq_api_key: str = ""
+    """Groq LPU API key. Empty string means not configured via env."""
+
     openrouter_api_key: str = ""
+    """OpenRouter API key. Empty string means not configured via env."""
 
     # Default provider + model used when none is persisted in the DB yet
     default_provider: str = "gemini"
+    """Fallback provider name when no active provider is stored in the DB."""
+
     default_model: str = "gemini-2.5-flash"
+    """Fallback model ID when no active model is stored in the DB."""
 
     # Maximum number of agent loop turns per conversation turn.
     # Increase for complex multi-step Revit automations, decrease for faster
     # responses in simple fetch-only workflows.
     agent_max_turns: int = 20
+    """
+    Maximum number of agent loop iterations per user turn.
+    Prevents infinite loops on complex multi-step automations.
+    """
 
     # ── Revit Bridge ─────────────────────────────────────────────────────────
     revit_bridge_host: str = "http://127.0.0.1"
+    """Hostname or IP address of the C# Revit bridge HTTP server."""
+
     revit_bridge_port: int = 8080
+    """TCP port the Revit bridge HTTP server listens on."""
 
     @property
     def revit_execute_url(self) -> str:
+        """
+        Full URL for the Revit bridge tool execution endpoint.
+
+        Returns:
+            str: e.g. 'http://127.0.0.1:8080/execute/'
+        """
         return f"{self.revit_bridge_host}:{self.revit_bridge_port}/execute/"
 
     @property
     def revit_discovery_url(self) -> str:
+        """
+        Full URL for the Revit bridge tool discovery endpoint.
+
+        Returns:
+            str: e.g. 'http://127.0.0.1:8080/tools/'
+        """
         return f"{self.revit_bridge_host}:{self.revit_bridge_port}/tools/"
 
     # ── Server ───────────────────────────────────────────────────────────────
     backend_host: str = "0.0.0.0"
+    """Host address the FastAPI backend binds to. '0.0.0.0' listens on all interfaces."""
+
     backend_port: int = 8000
+    """TCP port the FastAPI backend listens on."""
 
     # ── Database ─────────────────────────────────────────────────────────────
     database_path: str = "data/agent.db"
+    """Relative path (from backend/) to the SQLite database file."""
 
     @property
     def database_url(self) -> str:
+        """
+        Constructs the full async SQLite connection URL.
+
+        Returns:
+            str: SQLAlchemy async URL, e.g. 'sqlite+aiosqlite:///...data/agent.db'
+        """
         db_file = Path(__file__).parent / self.database_path
         return f"sqlite+aiosqlite:///{db_file}"
 
     # ── CORS ─────────────────────────────────────────────────────────────────
     @property
     def cors_origins(self) -> list[str]:
+        """
+        Allowed CORS origins based on development mode.
+
+        Returns:
+            list[str]: ['*'] in dev mode (allow all), or restricted to the
+                backend's own origin in production.
+        """
         if self.development_mode:
             return ["*"]
         return [f"http://localhost:{self.backend_port}"]
@@ -80,6 +155,12 @@ class Settings(BaseSettings):
     # ── Logging ──────────────────────────────────────────────────────────────
     @property
     def log_level(self) -> str:
+        """
+        Logging verbosity level.
+
+        Returns:
+            str: 'DEBUG' in dev mode for verbose output, 'INFO' in production.
+        """
         return "DEBUG" if self.development_mode else "INFO"
 
 

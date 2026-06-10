@@ -4,15 +4,30 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useMessageStore } from '@/store/messageStore';
 import type { ChatMessage, MessageRole, ToolCall } from '@/types';
 
+/**
+ * useSessions — manages session lifecycle and message loading.
+ *
+ * Encapsulates:
+ *  - Fetching the sessions list from the backend on mount
+ *  - Loading messages when the active session changes
+ *  - Creating, deleting, and renaming sessions
+ *
+ * @returns {{
+ *   sessions, activeSessionId, createSession, deleteSession, renameSession, refresh
+ * }}
+ */
 export function useSessions() {
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessions = useSessionStore((s) => s.sessions);
 
-  // Fetch all sessions
+  /**
+   * Fetch all sessions from the backend and update the store.
+   * Called on mount and available for manual refresh.
+   */
   const loadSessions = useCallback(async () => {
     try {
       const list = await sessionsApi.list();
-      useChatStore.getState().setSessions(list);
+      useSessionStore.getState().setSessions(list);
       // Do NOT auto-activate any session — start with a clean blank page.
       // The user explicitly clicks a session to open it.
     } catch (err) {
@@ -20,7 +35,14 @@ export function useSessions() {
     }
   }, []);
 
-  // Fetch detail for active session
+  /**
+   * Fetch full message history for a session and populate the message store.
+   *
+   * Parses tool_calls and agent_thoughts from JSON strings into typed objects.
+   * Called automatically when activeSessionId changes.
+   *
+   * @param id - UUID of the session to load messages for.
+   */
   const loadActiveSessionMessages = useCallback(async (id: string) => {
     try {
       const detail = await sessionsApi.get(id);
@@ -70,6 +92,13 @@ export function useSessions() {
     }
   }, [activeSessionId, loadActiveSessionMessages]);
 
+  /**
+   * Create a new session and immediately activate it.
+   *
+   * @param name - Human-readable name for the new session.
+   * @returns The newly created Session object.
+   * @throws Re-throws the API error for the caller to handle.
+   */
   const createSession = useCallback(async (name: string) => {
     try {
       const newSession = await sessionsApi.create(name);
@@ -82,6 +111,12 @@ export function useSessions() {
     }
   }, []);
 
+  /**
+   * Delete a session and remove it from the store.
+   * If the deleted session was active, the store auto-selects the next one.
+   *
+   * @param id - UUID of the session to delete.
+   */
   const deleteSession = useCallback(async (id: string) => {
     try {
       await sessionsApi.delete(id);
@@ -91,6 +126,12 @@ export function useSessions() {
     }
   }, []);
 
+  /**
+   * Rename a session and update its name in the store.
+   *
+   * @param id   - UUID of the session to rename.
+   * @param name - New human-readable name.
+   */
   const renameSession = useCallback(async (id: string, name: string) => {
     try {
       await sessionsApi.rename(id, name);

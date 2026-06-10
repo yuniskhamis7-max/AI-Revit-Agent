@@ -17,7 +17,23 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleProvider(AIProvider):
-    """Base class for OpenAI-compatible providers (different base_url)."""
+    """
+    Base class for providers that expose an OpenAI-compatible chat completions API.
+
+    Subclasses (OpenAI, Groq, OpenRouter) only need to override class-level
+    constants: name, base_url, default_model, available_models, and optionally
+    max_tool_description_length.
+
+    The stream_agent_turn method handles the full OpenAI streaming protocol:
+    text deltas, incremental tool call accumulation, and error handling.
+
+    Attributes:
+        base_url:                    API endpoint URL (e.g. 'https://api.openai.com/v1').
+        default_model:               Default model ID when none is specified.
+        max_tool_description_length: If set, truncate tool descriptions to this
+                                     many characters. Helps models that struggle
+                                     with complex schemas (e.g. Groq).
+    """
 
     # Override in subclasses
     base_url: str = "https://api.openai.com/v1"
@@ -26,6 +42,17 @@ class OpenAICompatibleProvider(AIProvider):
     max_tool_description_length: int | None = None
 
     def __init__(self, api_key: str, model: str | None = None) -> None:
+        """
+        Initialise the OpenAI-compatible provider.
+
+        Creates an AsyncOpenAI client pointed at the subclass's base_url.
+        Validates and sanitises the model string to reject serialisation
+        artifacts like '[object Object]'.
+
+        Args:
+            api_key: Provider API key.
+            model:   Model ID to use. Falls back to default_model or first available.
+        """
         try:
             from openai import AsyncOpenAI
             self._client = AsyncOpenAI(api_key=api_key, base_url=self.base_url)
@@ -39,6 +66,15 @@ class OpenAICompatibleProvider(AIProvider):
         self._model = m.strip()
 
     def validate_api_key(self, api_key: str) -> bool:
+        """
+        Perform a minimal format check on the API key.
+
+        Args:
+            api_key: Key to validate.
+
+        Returns:
+            bool: True if the key is non-empty and longer than 8 characters.
+        """
         return bool(api_key and len(api_key) > 8)
 
     async def stream_agent_turn(
@@ -47,6 +83,21 @@ class OpenAICompatibleProvider(AIProvider):
         tool_schemas: list[dict],
         system_prompt: str,
     ) -> AsyncGenerator[dict, None]:
+        """
+        Run one OpenAI-compatible inference turn and yield normalised events.
+
+        Streams text deltas as they arrive and accumulates tool call arguments
+        incrementally (since they arrive in chunks). Tool calls are yielded
+        after the stream ends.
+
+        Args:
+            messages:      Provider-agnostic conversation history.
+            tool_schemas:  Raw tool definitions from the bridge.
+            system_prompt: System instruction for the model.
+
+        Yields:
+            dict: Normalised events — text_delta, tool_call, error, or done.
+        """
         if self._client is None:
             yield {"type": "error", "content": f"openai package not installed ({self.name})."}
             yield {"type": "done"}
@@ -115,7 +166,20 @@ class OpenAICompatibleProvider(AIProvider):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _to_openai_messages(messages: list[dict], system_prompt: str) -> list[dict]:
-    """Convert provider-agnostic messages to OpenAI chat format."""
+    """
+    Convert provider-agnostic messages to OpenAI chat completions format.
+
+    Prepends the system prompt as the first message. Maps assistant tool calls
+    to OpenAI's tool_calls array format, and tool results to tool role messages.
+
+    Args:
+        messages:      List of dicts with keys: role, content, and optionally
+                       tool_calls / tool_call_id / name.
+        system_prompt: System instruction string to prepend.
+
+    Returns:
+        list[dict]: OpenAI-native message dicts for the chat completions API.
+    """
     result: list[dict] = []
     result.append({"role": "system", "content": system_prompt or SYSTEM_PROMPT})
     for msg in messages:
@@ -150,12 +214,21 @@ def _to_openai_messages(messages: list[dict], system_prompt: str) -> list[dict]:
 
 
 def _to_openai_tools(tool_schemas: list[dict], max_desc_length: int | None = None) -> list[dict]:
-    """Convert raw bridge schemas to OpenAI tool format.
+    """
+    Convert raw bridge schemas to OpenAI tool function format.
+
+    Wraps each schema in OpenAI's {type: 'function', function: {...}} envelope.
+    Optionally truncates the combined description + agent_instructions to
+    accommodate models that struggle with long tool descriptions.
 
     Args:
-        tool_schemas: Raw tool definitions from the bridge.
-        max_desc_length: If set, truncate the combined description to this many characters.
-                         Useful for models that struggle with complex tool schemas (e.g. Groq).
+        tool_schemas:    Raw tool definitions from the Revit bridge.
+        max_desc_length: If set, truncate the combined description to this many
+                         characters. Useful for models like Groq's Llama that
+                         struggle with complex tool schemas.
+
+    Returns:
+        list[dict]: OpenAI-native tool dicts for the chat completions API.
     """
     result = []
     for s in tool_schemas:

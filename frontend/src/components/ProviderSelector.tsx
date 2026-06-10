@@ -3,6 +3,17 @@ import { useProviderStore } from '@/store/providerStore';
 import { providersApi } from '@/api/settings';
 import type { Provider } from '@/types';
 
+/**
+ * ProviderSelector — dropdown controls for selecting AI provider and model.
+ *
+ * Renders two <select> elements in the app header:
+ * - Provider dropdown: lists all configured providers with their status
+ * - Model dropdown: lists available models for the selected provider
+ *
+ * Selection changes are immediately persisted to the backend via PUT /api/providers.
+ *
+ * @component
+ */
 export const ProviderSelector: React.FC = () => {
   const { providers, activeProvider, activeModel, setActiveProvider, setProviders } = useProviderStore();
 

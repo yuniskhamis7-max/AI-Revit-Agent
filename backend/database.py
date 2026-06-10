@@ -23,6 +23,16 @@ class Base(DeclarativeBase):
 
 
 def _build_engine():
+    """
+    Constructs the async SQLAlchemy engine using the configured database URL.
+
+    The engine uses aiosqlite for non-blocking SQLite access. SQL query logging
+    (echo) is enabled only in development mode for debugging. check_same_thread
+    is disabled because SQLAlchemy manages thread safety via its connection pool.
+
+    Returns:
+        sqlalchemy.ext.asyncio.AsyncEngine: The configured async database engine.
+    """
     settings = get_settings()
     return create_async_engine(
         settings.database_url,

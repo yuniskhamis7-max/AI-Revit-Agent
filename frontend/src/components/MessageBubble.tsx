@@ -5,6 +5,12 @@ import type { Components } from 'react-markdown';
 import type { ChatMessage, ToolCall } from '@/types';
 import { ToolCallCard } from './ToolCallCard';
 
+/**
+ * Props for the MessageBubble component.
+ *
+ * @property message - The ChatMessage to render, including content, tool calls,
+ *                     agent thoughts, and streaming state.
+ */
 interface MessageBubbleProps {
   message: ChatMessage;
 }
@@ -78,6 +84,20 @@ const markdownComponents: Components = {
   ),
 };
 
+/**
+ * MessageBubble — renders a single chat message with optional collapsible sections.
+ *
+ * For assistant messages, renders:
+ * - Collapsible agent thoughts (orchestrator status steps)
+ * - Collapsible model reasoning (chain-of-thought)
+ * - Markdown-rendered text content with GFM support
+ * - Tool call cards (via ToolCallCard)
+ *
+ * For user messages, renders plain text with RTL detection.
+ *
+ * @component
+ * @param props.message - The ChatMessage to render.
+ */
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const isUser      = message.role === 'user';
   const isStreaming  = message.role === 'streaming' || message.isStreaming;
