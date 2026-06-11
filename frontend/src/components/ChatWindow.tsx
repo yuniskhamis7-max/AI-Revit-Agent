@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
+import { useUIStore } from '@/store/uiStore';
 import { MessageBubble } from './MessageBubble';
 import type { ChatMessage } from '@/types';
 
@@ -24,6 +25,7 @@ import type { ChatMessage } from '@/types';
 export const ChatWindow: React.FC = () => {
   const { messages, isStreaming } = useMessageStore();
   const { activeSessionId } = useSessionStore();
+  const { revitStatus } = useUIStore();
   const { sendMessage, cancelStream } = useChat();
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -69,6 +71,11 @@ export const ChatWindow: React.FC = () => {
 
   return (
     <div className="chat-window">
+      {revitStatus === 'disconnected' && (
+        <div className="revit-offline-banner">
+          ⚠️ Revit connection offline. Please ensure Revit is running and the bridge is started.
+        </div>
+      )}
       <div className="chat-messages-container">
         {messages.length === 0 ? (
           <div className="empty-chat-welcome">

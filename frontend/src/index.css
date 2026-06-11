@@ -1484,3 +1484,17 @@ body::before {
 .agent-thought-line:last-child {
   border-bottom: none;
 }
+
+.revit-offline-banner {
+  background: rgba(239, 68, 68, 0.15);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--color-danger);
+  padding: 10px 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}

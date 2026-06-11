@@ -91,12 +91,7 @@ async def check_bridge_health() -> bool:
 async def discover_tools() -> list[dict]:
     """
     Calls GET /tools/ on the Revit bridge and returns the raw tool schema list.
-
-    In DEVELOPMENT_MODE, if the bridge is unreachable:
-      - Falls back to the cached schemas/tools.json snapshot (if available)
-      - If no cache exists either, returns an empty list with a warning
-    In production mode, raises on failure.
-
+    Raises RuntimeError on failure.
     Side effect: writes schemas/tools.json snapshot on every successful discovery.
     """
     settings = get_settings()
@@ -120,45 +115,10 @@ async def discover_tools() -> list[dict]:
         return schemas
 
     except Exception as exc:
-        if settings.development_mode:
-            # ── Fallback: load from cached snapshot if available ────────────
-            cached = _load_cached_schemas()
-            if cached:
-                logger.warning(
-                    "Bridge unreachable (%s). Loaded %d tool(s) from cached snapshot.",
-                    exc, len(cached),
-                )
-                return cached
-
-            logger.warning(
-                "Bridge unreachable during tool discovery (%s). "
-                "No cached schemas available. Running with empty tool set (DEVELOPMENT_MODE=true).",
-                exc,
-            )
-            return []
         raise RuntimeError(
             f"Cannot reach Revit bridge at {settings.revit_discovery_url}. "
             "Ensure Revit is running and the bridge button has been clicked."
         ) from exc
-
-
-def _load_cached_schemas() -> list[dict]:
-    """
-    Loads tool schemas from the on-disk snapshot (schemas/tools.json).
-    Returns the cached list, or [] if the file doesn't exist or is invalid.
-    """
-    if not _SCHEMA_SNAPSHOT_PATH.exists():
-        return []
-    try:
-        raw = _SCHEMA_SNAPSHOT_PATH.read_text(encoding="utf-8")
-        schemas = json.loads(raw)
-        if isinstance(schemas, list) and len(schemas) > 0:
-            logger.debug("Loaded %d cached tool schema(s) from %s", len(schemas), _SCHEMA_SNAPSHOT_PATH)
-            return schemas
-    except Exception as exc:
-        logger.warning("Failed to read cached schemas from %s: %s", _SCHEMA_SNAPSHOT_PATH, exc)
-    return []
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tool Execution

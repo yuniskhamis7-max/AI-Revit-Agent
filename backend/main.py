@@ -1,21 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 FastAPI Application — Entry point for the AI-Revit Agent backend.
-
-Startup sequence:
-  1. Ensure data/ directory exists
-  2. Create SQLite tables (idempotent) + run column migrations
-  3. Initialise shared HTTP client
-  4. Discover Revit tools from bridge (soft-fail in DEVELOPMENT_MODE)
-  5. Load tool registry
-  6. Mount API routers
-  7. Serve React SPA from frontend/dist/ (if built)
-
-Run in development:
-  uvicorn main:app --reload --port 8000
-
-Run in production:
-  uvicorn main:app --port 8000
 """
 from __future__ import annotations
 
@@ -33,8 +18,7 @@ from api.providers import router as providers_router
 from api.sessions import router as sessions_router
 from api.settings import router as settings_router
 from config import get_settings
-from database import create_all_tables
-from migrations import run_startup_migrations
+from infra.db import Database
 from services.revit_bridge import discover_tools, init_http_client, close_http_client
 from services.tool_registry import registry
 
@@ -52,9 +36,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Startup schema migrations are managed in backend/migrations.py
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Lifespan
 # ─────────────────────────────────────────────────────────────────────────────
@@ -67,19 +48,19 @@ async def lifespan(app: FastAPI):
     logger.info("  DEVELOPMENT_MODE = %s", settings.development_mode)
     logger.info("=" * 60)
 
-    # 1. Ensure the data/ directory exists before touching the DB
+    # 1. Ensure the data/ directory exists and initialize SQLite DB
     db_file = Path(__file__).parent / settings.database_path
     db_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    db = Database(str(db_file))
+    await db.initialize()
+    app.state.db = db
+    logger.info("SQLite database tables initialized and ready.")
 
-    # 2. Initialise database tables and run column migrations
-    await create_all_tables()
-    await run_startup_migrations()
-    logger.info("Database tables ready.")
-
-    # 3. Initialise shared HTTP client (for Revit bridge calls)
+    # 2. Initialise shared HTTP client (for Revit bridge calls)
     init_http_client()
 
-    # 4. Discover Revit tools
+    # 3. Discover Revit tools
     try:
         schemas = await discover_tools()
         registry.load(schemas)
@@ -87,13 +68,15 @@ async def lifespan(app: FastAPI):
             logger.info("Tool registry loaded: %d tools.", len(schemas))
         else:
             logger.warning(
-                "Tool registry is empty. Start Revit and click 'Start Bridge', "
-                "then restart the backend."
+                "Tool registry is empty. Start Revit and click 'Start Bridge'."
             )
     except Exception as exc:
-        logger.error("Tool discovery failed: %s", exc)
-        if not settings.development_mode:
-            raise
+        logger.warning(
+            "Initial Revit tool discovery failed (Revit may not be running): %s. "
+            "The backend will start normally, and Revit tools will be automatically loaded "
+            "when Revit bridge comes online.",
+            exc
+        )
 
     logger.info("Backend ready. Listening on http://%s:%d", settings.backend_host, settings.backend_port)
 
@@ -134,14 +117,10 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
 
     # ── Serve React SPA (production mode) ────────────────────────────────────
-    # The frontend/dist directory is created by `npm run build` in frontend/.
-    # In development, use `npm run dev` (Vite dev server on :5173 with /api proxy).
     frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
     if frontend_dist.exists():
-        # Mount the assets directory so JS/CSS files are served correctly
         app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
 
-        # Catch-all for SPA routing — serve index.html for all non-API paths
         from fastapi.responses import FileResponse
 
         @app.get("/{full_path:path}", include_in_schema=False)
@@ -165,10 +144,6 @@ def create_app() -> FastAPI:
 
 app = create_app()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Dev entry point
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
