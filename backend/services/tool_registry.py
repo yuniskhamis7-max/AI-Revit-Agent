@@ -2,12 +2,6 @@
 """
 Tool Registry Service — Manages the live tool schema discovered from the
 Revit bridge and exposes typed accessors used by the AI provider adapters.
-
-Key responsibilities:
-  - Cache the raw tool schemas from bridge discovery
-  - Classify tools as 'read' (fetch_*) or 'write' (everything else)
-  - Build provider-agnostic tool descriptor dicts
-  - Build the bridge dispatcher map (tool_name -> async callable)
 """
 from __future__ import annotations
 
@@ -15,17 +9,12 @@ import logging
 import time
 from typing import Any, Callable
 
-from services.revit_bridge import discover_tools, execute_tool
+from services.revit_bridge import RevitBridgeClient
 
 logger = logging.getLogger(__name__)
 
 # Minimum seconds between automatic re-discovery attempts to avoid hammering
 _REDISCOVER_COOLDOWN = 5.0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tool classification
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Cached lookup for quick classification after the registry is loaded.
 # Maps tool_name -> requires_approval (bool).
@@ -34,58 +23,39 @@ _approval_cache: dict[str, bool] = {}
 
 def is_read_tool(tool_name: str) -> bool:
     """
-    Returns True for read-only fetch tools (auto-executed without approval).
-
-    Classification priority:
-      1. Explicit 'requires_approval' field in the tool schema (preferred).
-         Set by the Revit bridge in register_tool() if present.
-      2. Naming convention fallback: tools starting with 'fetch_' are read tools.
-         Used for schemas that don't include the explicit field (legacy or external).
+    Returns True for read-only fetch tools.
     """
     if tool_name in _approval_cache:
         return not _approval_cache[tool_name]
-    # Fallback to naming convention
     return tool_name.startswith("fetch_")
 
 
 def requires_approval(tool_name: str) -> bool:
-    """Inverse of is_read_tool — used when building SSE events."""
+    """Inverse of is_read_tool."""
     if tool_name in _approval_cache:
         return _approval_cache[tool_name]
     return not tool_name.startswith("fetch_")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Registry
-# ─────────────────────────────────────────────────────────────────────────────
-
 class ToolRegistry:
     """
     Holds the tool schemas and dispatcher map for a single server lifetime.
-
-    The registry is populated once at startup (via load()) and then read-only.
-    It is intentionally a plain class (not a singleton module global) so it
-    can be injected as a FastAPI dependency and easily replaced in tests.
     """
-
     def __init__(self) -> None:
         self._schemas: list[dict] = []
         self._dispatcher_map: dict[str, Callable[..., Any]] = {}
         self._loaded: bool = False
         self._last_discover_attempt: float = 0.0
 
-    def load(self, schemas: list[dict]) -> None:
+    def load(self, schemas: list[dict], bridge: RevitBridgeClient) -> None:
         """
-        Populate the registry from the raw schema list returned by discover_tools().
-        Builds the dispatcher map and approval cache in the same pass.
+        Populate the registry from the raw schema list and link the bridge client.
         """
         self._schemas = schemas
         self._dispatcher_map = {
-            schema["name"]: _make_dispatcher(schema["name"])
+            schema["name"]: _make_dispatcher(schema["name"], bridge)
             for schema in schemas
         }
-        # Populate approval cache from explicit schema field (if present).
-        # Falls back to naming convention at call time when field is absent.
         _approval_cache.clear()
         for schema in schemas:
             name = schema["name"]
@@ -108,15 +78,10 @@ class ToolRegistry:
         """Raw tool schema list (as returned by the bridge)."""
         return self._schemas
 
-    async def ensure_loaded(self, force: bool = False) -> bool:
+    async def ensure_loaded(self, bridge: RevitBridgeClient, force: bool = False) -> bool:
         """
-        If the registry is empty or was loaded with 0 tools (or force=True),
-        attempt to re-discover tools from the Revit bridge.
-        Returns True if tools are now available.
-
-        Respects a cooldown to avoid hammering the bridge on every request.
+        If the registry is empty, attempt to re-discover tools using the bridge client.
         """
-        # Skip only if we have actual tools loaded (not just an empty discovery)
         if self._loaded and self._schemas and not force:
             return True
 
@@ -132,9 +97,9 @@ class ToolRegistry:
         )
 
         try:
-            schemas = await discover_tools()
+            schemas = await bridge.discover_tools()
             if schemas:
-                self.load(schemas)
+                self.load(schemas, bridge)
                 logger.info(
                     "ToolRegistry re-discovered %d tools — registry is now live.",
                     len(schemas),
@@ -164,18 +129,13 @@ class ToolRegistry:
         return [s for s in self._schemas if not is_read_tool(s["name"])]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Dispatcher factory
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _make_dispatcher(tool_name: str) -> Callable[..., Any]:
+def _make_dispatcher(tool_name: str, bridge: RevitBridgeClient) -> Callable[..., Any]:
     """
-    Returns an async callable that executes the named tool via the bridge.
-    Each closure captures tool_name to avoid the classic late-binding bug.
+    Returns an async callable that executes the named tool via the bridge client instance.
     """
     async def dispatcher(**kwargs: Any) -> dict:
         logger.info("Executing tool '%s' with args: %s", tool_name, kwargs)
-        result = await execute_tool(tool_name, kwargs)
+        result = await bridge.execute_tool(tool_name, kwargs)
         logger.debug("Tool '%s' result: %s", tool_name, result)
         return result
 
@@ -183,9 +143,5 @@ def _make_dispatcher(tool_name: str) -> Callable[..., Any]:
     return dispatcher
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Module-level singleton — shared across the app lifetime
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Initialised as empty; populated in main.py lifespan before routes are served.
+# Module-level singleton
 registry = ToolRegistry()

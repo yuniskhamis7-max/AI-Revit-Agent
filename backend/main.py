@@ -19,7 +19,7 @@ from api.sessions import router as sessions_router
 from api.settings import router as settings_router
 from config import get_settings
 from infra.db import Database
-from services.revit_bridge import discover_tools, init_http_client, close_http_client
+from services.revit_bridge import RevitBridgeClient
 from services.tool_registry import registry
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,13 +57,15 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     logger.info("SQLite database tables initialized and ready.")
 
-    # 2. Initialise shared HTTP client (for Revit bridge calls)
-    init_http_client()
+    # 2. Initialise shared Revit bridge client
+    bridge = RevitBridgeClient(host=settings.revit_bridge_host, port=settings.revit_bridge_port)
+    await bridge.start()
+    app.state.revit_bridge = bridge
 
     # 3. Discover Revit tools
     try:
-        schemas = await discover_tools()
-        registry.load(schemas)
+        schemas = await bridge.discover_tools()
+        registry.load(schemas, bridge)
         if schemas:
             logger.info("Tool registry loaded: %d tools.", len(schemas))
         else:
@@ -83,7 +85,7 @@ async def lifespan(app: FastAPI):
     yield  # ← application runs here
 
     logger.info("Backend shutting down.")
-    await close_http_client()
+    await app.state.revit_bridge.stop()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -137,56 +137,74 @@ At startup, the database helper automatically creates the SQLite database at `ba
 
 ```mermaid
 erDiagram
-    SESSIONS ||--o{ MESSAGES : "has many"
-    SESSIONS {
+    sessions ||--o{ messages : "has many"
+    sessions {
         TEXT id PK
-        TEXT title
-        INTEGER created_at
+        TEXT name
+        TEXT created_at
+        TEXT updated_at
     }
-    MESSAGES {
-        INTEGER id PK
+    messages {
+        TEXT id PK
         TEXT session_id FK
-        TEXT role "user / assistant"
+        TEXT role
         TEXT content
-        TEXT tool_calls "JSON string"
-        INTEGER created_at
+        TEXT tool_calls
+        TEXT agent_thoughts
+        TEXT tool_name
+        TEXT tool_call_id
+        INTEGER approved
+        TEXT created_at
     }
-    PROVIDER_CONFIGS {
-        TEXT provider_id PK
+    provider_configs {
+        TEXT id PK
+        TEXT provider UNIQUE
         TEXT api_key
         TEXT active_model
+        INTEGER active
+        TEXT updated_at
     }
-    APP_SETTINGS {
+    app_settings {
         TEXT key PK
         TEXT value
+        TEXT updated_at
     }
 ```
 
 #### 1. `sessions`
 Stores unique chat conversation records.
 * `id` (TEXT, PK): Unique UUID identifying the session.
-* `title` (TEXT): Auto-generated summary of the conversation.
-* `created_at` (INTEGER): Epoch timestamp of creation.
+* `name` (TEXT): Title of the chat session.
+* `created_at` (TEXT): ISO 8601 creation timestamp.
+* `updated_at` (TEXT): ISO 8601 last-updated timestamp.
 
 #### 2. `messages`
-Stores individual conversation turns.
-* `id` (INTEGER, PK): Auto-incrementing identifier.
-* `session_id` (TEXT, FK): Links to the owner session.
-* `role` (TEXT): Identifies the speaker (`"user"` or `"assistant"`).
-* `content` (TEXT): The message text.
-* `tool_calls` (TEXT): A JSON string representing tool calls and results executed in this turn.
-* `created_at` (INTEGER): Epoch timestamp of the message.
+Stores individual conversation turns, assistant progress, thoughts, and tool results.
+* `id` (TEXT, PK): Unique UUID identifying the message.
+* `session_id` (TEXT, FK): Links to the owner session (cascades on delete).
+* `role` (TEXT): Identifies the speaker (`"user"`, `"assistant"`, or `"tool"`).
+* `content` (TEXT): The message text or JSON-serialized tool output.
+* `tool_calls` (TEXT, Optional): JSON string representing tool execution requests.
+* `agent_thoughts` (TEXT, Optional): JSON string listing synthetic status/reasoning steps.
+* `tool_name` (TEXT, Optional): Specific tool name (for role `"tool"`).
+* `tool_call_id` (TEXT, Optional): Matches the ID of the tool call in the assistant message.
+* `approved` (INTEGER, Optional): approval state (`1` for approved, `0` for rejected, or NULL).
+* `created_at` (TEXT): ISO 8601 timestamp of creation.
 
 #### 3. `provider_configs`
 Configures AI model providers.
-* `provider_id` (TEXT, PK): Provider key (currently `"gemini"`).
-* `api_key` (TEXT): Configured API key (takes precedence over `.env`).
-* `active_model` (TEXT): Selected model (e.g., `"gemini-2.5-flash"`).
+* `id` (TEXT, PK): Unique configuration UUID.
+* `provider` (TEXT, UNIQUE): Provider name (e.g., `"gemini"`).
+* `api_key` (TEXT, Optional): Configured API key (takes precedence over `.env`).
+* `active_model` (TEXT, Optional): Selected model ID (e.g., `"gemini-2.5-flash"`).
+* `active` (INTEGER): `1` if this is the active system provider, `0` otherwise.
+* `updated_at` (TEXT): ISO 8601 timestamp of last update.
 
 #### 4. `app_settings`
-Arbitrary key-value store for app configuration.
+Arbitrary key-value store for app configuration and preferences.
 * `key` (TEXT, PK): Configuration key.
 * `value` (TEXT): Stringified value.
+* `updated_at` (TEXT): ISO 8601 timestamp of last update.
 
 ---
 
@@ -206,12 +224,15 @@ The backend communicates with the React frontend through a Server-Sent Events (S
 
 | Event Type | Purpose | Payload Schema |
 |---|---|---|
-| `thought` | Real-time reasoning logs or inner dialogue. | `{ "content": "Searching for level elevations..." }` |
-| `text` | Raw markdown content chunks. | `{ "delta": "I have created " }` |
-| `tool_call` | Details of a tool call before execution. | `{ "name": "create_grid", "args": { "start": [0,0], "end": [10,0] } }` |
-| `tool_result` | Result returned from Revit execution. | `{ "name": "create_grid", "result": { "status": "success", "id": "12983" } }` |
-| `done` | Signals the end of the streaming session. | `{ "session_id": "uuid-xxx" }` |
-| `error` | Exception details. | `{ "detail": "Revit bridge is disconnected." }` |
+| `agent_thought` | Synthetic thought logs or progress messages. | `{ "type": "agent_thought", "content": "..." }` |
+| `text_delta` | Incremental text responses from the AI. | `{ "type": "text_delta", "content": "..." }` |
+| `thinking_delta` | Internal chain-of-thought stream chunks from Gemini. | `{ "type": "thinking_delta", "content": "..." }` |
+| `tool_call_pending` | Details of a tool call before approval/execution. | `{ "type": "tool_call_pending", "id": "...", "tool": "...", "args": {...}, "requires_approval": false }` |
+| `tool_call_executing` | Signal that a tool is actively running in Revit. | `{ "type": "tool_call_executing", "id": "...", "tool": "..." }` |
+| `tool_result` | Result returned from Revit tool execution. | `{ "type": "tool_result", "id": "...", "tool": "...", "result": {...}, "approved": true }` |
+| `agent_paused` | Signal that the agent is paused waiting for user approval. | `{ "type": "agent_paused", "awaiting_approval_id": "...", "tool": "..." }` |
+| `error` | Exception details when execution fails. | `{ "type": "error", "message": "...", "detail": "..." }` |
+| `done` | Signals the end of the streaming session. | `{ "type": "done", "session_id": "...", "message_id": "..." }` |
 
 ---
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from config import get_settings
 from infra.db import Database
-from services.revit_bridge import check_bridge_health, discover_tools
+from services.revit_bridge import RevitBridgeClient
 from services.tool_registry import registry
 
 logger = logging.getLogger(__name__)
@@ -47,16 +47,17 @@ async def upsert_settings(body: SettingsPayload, db: Database = Depends(get_db))
     return body.settings
 
 @router.get("/api/revit/status")
-async def revit_status():
+async def revit_status(request: Request):
     """Lightweight Revit bridge health check with automatic tool re-discovery."""
     global _bridge_was_connected
-    connected = await check_bridge_health()
+    bridge: RevitBridgeClient = request.app.state.revit_bridge
+    connected = await bridge.check_health()
 
     # Auto-recover: re-discover tools when bridge comes back online
     if connected and not _bridge_was_connected:
         try:
-            schemas = await discover_tools()
-            registry.load(schemas)
+            schemas = await bridge.discover_tools()
+            registry.load(schemas, bridge)
             logger.info("Bridge reconnected — reloaded %d tools.", len(schemas))
         except Exception as exc:
             logger.warning("Bridge reconnected but tool re-discovery failed: %s", exc)
@@ -65,11 +66,12 @@ async def revit_status():
     return {"connected": connected, "tool_count": len(registry.schemas)}
 
 @router.post("/api/revit/refresh-tools")
-async def refresh_tools():
+async def refresh_tools(request: Request):
     """Force a fresh tool discovery from the Revit bridge."""
     try:
-        schemas = await discover_tools()
-        registry.load(schemas)
+        bridge: RevitBridgeClient = request.app.state.revit_bridge
+        schemas = await bridge.discover_tools()
+        registry.load(schemas, bridge)
         logger.info("Manual tool refresh: loaded %d tools.", len(schemas))
         return {
             "status": "success",

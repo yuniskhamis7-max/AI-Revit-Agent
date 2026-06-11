@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RevitAgentBridge")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a88324b5f2c6d7a792e75de91cb3867263b8cad0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2f815eac9e1db1e0787de0af12d69bb6a72974af")]
 [assembly: System.Reflection.AssemblyProductAttribute("RevitAgentBridge")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RevitAgentBridge")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

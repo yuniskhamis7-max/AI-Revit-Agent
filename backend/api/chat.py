@@ -15,9 +15,9 @@ from pydantic import BaseModel, field_validator
 
 from config import get_settings
 from providers import get_provider
-from services import streaming as sse
+from services.streaming import SSEEventBuilder
 from services.tool_registry import registry
-from core.agent_loop import run_agent_loop
+from core.agent_loop import AgentOrchestrator
 from infra.db import Database
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
 
     # Dynamic check to ensure the tool registry is initialized
     if not registry.schemas:
-        await registry.ensure_loaded()
+        await registry.ensure_loaded(request.app.state.revit_bridge)
 
     provider_name, model, api_key = await _resolve_provider(body, db, settings)
 
@@ -98,7 +98,7 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
     async def execute_tool_callback(tool_name: str, args: dict) -> dict:
         dispatcher = registry.get_dispatcher(tool_name)
         if dispatcher is None:
-            await registry.ensure_loaded(force=True)
+            await registry.ensure_loaded(request.app.state.revit_bridge, force=True)
             dispatcher = registry.get_dispatcher(tool_name)
         
         if dispatcher is None:
@@ -113,11 +113,15 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
         tc_map: dict[str, dict] = {}
         accumulated_thoughts: list[str] = []
 
+        orchestrator = AgentOrchestrator(
+            provider=provider,
+            tool_schemas=tool_schemas,
+            max_turns=settings.agent_max_turns
+        )
+
         try:
-            async for event in run_agent_loop(
-                provider=provider,
+            async for event in orchestrator.run(
                 messages=history,
-                tool_schemas=tool_schemas,
                 execute_tool_fn=execute_tool_callback
             ):
                 # Detect client disconnect and stop generator
@@ -129,11 +133,11 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
                 if etype == "text_delta":
                     content = event.get("content", "")
                     accumulated_text.append(content)
-                    yield sse.text_delta(content)
+                    yield SSEEventBuilder.text_delta(content)
                 elif etype == "agent_thought":
                     content = event.get("content", "")
                     accumulated_thoughts.append(content)
-                    yield sse.agent_thought(content)
+                    yield SSEEventBuilder.agent_thought(content)
                 elif etype == "tool_call_pending":
                     tc_id = event.get("id", "")
                     tc_map[tc_id] = {
@@ -142,7 +146,7 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
                         "args": event.get("args", {}),
                         "status": "pending"
                     }
-                    yield sse.tool_call_pending(
+                    yield SSEEventBuilder.tool_call_pending(
                         call_id=tc_id,
                         tool_name=event.get("tool", ""),
                         args=event.get("args", {}),
@@ -152,7 +156,7 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
                     tc_id = event.get("id", "")
                     if tc_id in tc_map:
                         tc_map[tc_id]["status"] = "executing"
-                    yield sse.tool_call_executing(
+                    yield SSEEventBuilder.tool_call_executing(
                         call_id=tc_id,
                         tool_name=event.get("tool", "")
                     )
@@ -162,25 +166,25 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
                         tc_map[tc_id]["status"] = "done"
                         tc_map[tc_id]["result"] = event.get("result")
                         tc_map[tc_id]["approved"] = True
-                    yield sse.tool_result(
+                    yield SSEEventBuilder.tool_result(
                         call_id=tc_id,
                         tool_name=event.get("tool", ""),
                         result=event.get("result", {}),
                         approved=True
                     )
                 elif etype == "error":
-                    yield sse.error(
+                    yield SSEEventBuilder.error(
                         message=event.get("content", ""),
                         detail=event.get("detail", "")
                     )
 
             # Send done event at the end
-            yield sse.done(session_id=session_id, message_id=message_id)
+            yield SSEEventBuilder.done(session_id=session_id, message_id=message_id)
 
         except Exception as exc:
             logger.exception("Unhandled error in agent loop execution")
-            yield sse.error("Internal agent error.", detail=str(exc))
-            yield sse.done(session_id=session_id, message_id=message_id)
+            yield SSEEventBuilder.error("Internal agent error.", detail=str(exc))
+            yield SSEEventBuilder.done(session_id=session_id, message_id=message_id)
         finally:
             # ── Persist assistant progress to database ────────────────────
             full_text = "".join(accumulated_text).strip()
