@@ -1,0 +1,1 @@
+The `run.bat` script provides a unified development launcher that kills existing processes on ports 8000/5173, starts the backend and frontend in separate windows, and opens the browser.

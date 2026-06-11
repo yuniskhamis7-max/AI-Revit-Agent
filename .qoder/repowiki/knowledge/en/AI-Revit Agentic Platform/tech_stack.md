@@ -1,0 +1,1 @@
+FastAPI (Python 3.11+), React (Vite/TypeScript), .NET 8.0 (C# Bridge), SQLite (Session Persistence), SSE (Real-time Streaming)

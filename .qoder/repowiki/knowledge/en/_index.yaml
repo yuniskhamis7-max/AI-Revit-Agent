@@ -1,0 +1,171 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+exported_at: "2026-06-11T00:30:11Z"
+modules:
+    "":
+        dir_name: AI-Revit Agentic Platform
+        title: AI-Revit Agentic Platform
+        scope:
+            - README.md
+            - .gitignore
+            - .gitattributes
+            - run.bat
+            - schemas/
+            - .qoder\repowiki\en\content\Architecture Deep Dive\Architecture Deep Dive.md
+            - .qoder\repowiki\en\content\Architecture Deep Dive\Component Responsibilities and Boundaries.md
+            - .qoder\repowiki\en\content\Architecture Deep Dive\Data Flow and Processing Pipeline.md
+            - .qoder\repowiki\en\content\Architecture Deep Dive\Design Patterns Implementation.md
+            - .qoder\repowiki\en\content\Architecture Deep Dive\Layered Architecture Overview.md
+            - .qoder\repowiki\en\content\Core Components\Core Components.md
+            - .qoder\repowiki\en\content\Core Components\FastAPI Backend Architecture.md
+            - .qoder\repowiki\en\content\Core Components\Interpreter Layer\Grammar Patterns.md
+            - .qoder\repowiki\en\content\Core Components\Interpreter Layer\Interpreter Layer.md
+            - .qoder\repowiki\en\content\Core Components\Interpreter Layer\Natural Language Parsing.md
+            - .qoder\repowiki\en\content\Core Components\Interpreter Layer\Payload Generation.md
+            - .qoder\repowiki\en\content\Core Components\Planning and Execution\Dependency Management.md
+            - .qoder\repowiki\en\content\Core Components\Planning and Execution\Execution Plan Generation.md
+            - .qoder\repowiki\en\content\Core Components\Planning and Execution\Executor Coordination.md
+            - .qoder\repowiki\en\content\Core Components\Planning and Execution\Planning and Execution.md
+            - .qoder\repowiki\en\content\Core Components\Runtime Orchestration.md
+            - .qoder\repowiki\en\content\Data Management\Context Snapshots.md
+            - .qoder\repowiki\en\content\Data Management\Data Management.md
+            - .qoder\repowiki\en\content\Data Management\Payload Schemas.md
+            - .qoder\repowiki\en\content\Data Management\Serialization System.md
+            - .qoder\repowiki\en\content\Development Guidelines.md
+            - .qoder\repowiki\en\content\Getting Started.md
+            - .qoder\repowiki\en\content\Project Overview.md
+            - .qoder\repowiki\en\content\Revit Integration\Document Access.md
+            - .qoder\repowiki\en\content\Revit Integration\Grid Operations.md
+            - .qoder\repowiki\en\content\Revit Integration\Level Operations.md
+            - .qoder\repowiki\en\content\Revit Integration\Revit Integration.md
+            - .qoder\repowiki\en\content\Revit Integration\Transaction Management.md
+            - .qoder\repowiki\en\content\Revit Integration\UI Interaction.md
+            - .qoder\repowiki\en\content\Testing and Validation.md
+            - .qoder\repowiki\en\content\Utilities and Tools.md
+            - .qoder\repowiki\en\meta\repowiki-metadata.json
+            - .vscode\settings.json
+            - Project Documentation.md
+            - backend\.env
+            - backend\.env.example
+            - backend\api\__init__.py
+            - backend\api\chat.py
+            - backend\api\providers.py
+            - backend\api\sessions.py
+            - backend\api\settings.py
+            - backend\config.py
+            - backend\data\agent.db
+            - backend\database.py
+            - backend\main.py
+            - backend\migrations.py
+            - backend\models.py
+            - backend\providers\__init__.py
+            - backend\providers\anthropic.py
+            - backend\providers\base.py
+            - backend\providers\gemini.py
+            - backend\providers\groq.py
+            - backend\providers\openai.py
+            - backend\providers\openai_compat.py
+            - backend\providers\openrouter.py
+            - backend\requirements.txt
+            - backend\schemas\tools.json
+            - backend\services\__init__.py
+            - backend\services\agent.py
+            - backend\services\revit_bridge.py
+            - backend\services\streaming.py
+            - backend\services\tool_registry.py
+            - bridge-source\BridgeServer.cs
+            - bridge-source\RevitAgentBridge.csproj
+            - extension\AI_Agent.extension\AI_Agent.tab\Panel.panel\StartBridge.pushbutton\RevitAgentBridge.dll
+            - extension\AI_Agent.extension\AI_Agent.tab\Panel.panel\StartBridge.pushbutton\bundle.yaml
+            - extension\AI_Agent.extension\AI_Agent.tab\Panel.panel\StartBridge.pushbutton\script.py
+            - frontend\.gitignore
+            - frontend\README.md
+            - frontend\eslint.config.js
+            - frontend\index.html
+            - frontend\package-lock.json
+            - frontend\package.json
+            - frontend\public\favicon.svg
+            - frontend\public\icons.svg
+            - frontend\src\App.css
+            - frontend\src\App.tsx
+            - frontend\src\api\chat.ts
+            - frontend\src\api\client.ts
+            - frontend\src\api\settings.ts
+            - frontend\src\assets\hero.png
+            - frontend\src\assets\react.svg
+            - frontend\src\assets\vite.svg
+            - frontend\src\components\ApprovalModal.tsx
+            - frontend\src\components\ChatWindow.tsx
+            - frontend\src\components\ErrorBoundary.tsx
+            - frontend\src\components\MessageBubble.tsx
+            - frontend\src\components\ProviderSelector.tsx
+            - frontend\src\components\SessionSidebar.tsx
+            - frontend\src\components\SettingsPanel.tsx
+            - frontend\src\components\ToolCallCard.tsx
+            - frontend\src\hooks\useChat.ts
+            - frontend\src\hooks\useSessions.ts
+            - frontend\src\index.css
+            - frontend\src\main.tsx
+            - frontend\src\store\approvalStore.ts
+            - frontend\src\store\chatStore.ts
+            - frontend\src\store\messageStore.ts
+            - frontend\src\store\providerStore.ts
+            - frontend\src\store\sessionStore.ts
+            - frontend\src\store\uiStore.ts
+            - frontend\src\types\index.ts
+            - frontend\tsconfig.app.json
+            - frontend\tsconfig.json
+            - frontend\tsconfig.node.json
+            - frontend\vite.config.ts
+            - schemas\tools.json
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend:
+        dir_name: AI-Revit Agent Backend
+        title: AI-Revit Agent Backend
+        scope:
+            - backend/
+        source_files: []
+        children:
+            - backend/data_layer
+        depends_on: []
+        related_to:
+            - path: frontend
+            - path: revit_bridge
+    backend/data_layer:
+        dir_name: Data Persistence & ORM Layer
+        title: Data Persistence & ORM Layer
+        scope:
+            - backend/models.py
+            - backend/database.py
+            - backend/migrations.py
+            - backend/config.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    frontend:
+        dir_name: AI Revit Agent Frontend
+        title: AI Revit Agent Frontend
+        scope:
+            - frontend/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend
+    revit_bridge:
+        dir_name: Revit AI Agent Bridge
+        title: Revit AI Agent Bridge
+        scope:
+            - bridge-source/
+            - extension/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend

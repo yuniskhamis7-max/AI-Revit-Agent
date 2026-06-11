@@ -1,0 +1,3 @@
+- **C# (.NET 8.0 Windows)**: Used for the HTTP listener and Revit API interop (`RevitAPI.dll`, `RevitAPIUI.dll`).
+- **IronPython 2.7**: Embedded Python engine within Revit/pyRevit for executing tool logic.
+- **pyRevit**: Framework for integrating the Python script into the Revit UI.

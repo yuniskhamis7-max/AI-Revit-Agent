@@ -1,0 +1,2 @@
+- Shared JSON schema definitions for BIM tools are maintained in `schemas/tools.json` and synchronized between the backend registry and LLM providers.
+- Cross-module HTTP communication is standardized on localhost ports: 8000 for the Backend API, 5173 for the Frontend Dev Server, and 8080 for the Revit C# Bridge.

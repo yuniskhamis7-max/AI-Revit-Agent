@@ -1,0 +1,3 @@
+- Async generators are used for both the core agent loop and LLM provider adapters to stream SSE-compatible events.
+- Shared singletons (HTTP client, DB engine, tool registry) are initialized during application lifespan and accessed via module-level globals or dependency injection.
+- Tool classification relies on a dual strategy: explicit `requires_approval` schema fields take precedence over `fetch_*` naming conventions.

@@ -1,0 +1,3 @@
+- Tool functions in Python follow a consistent signature `(doc, tool_input)` and return a dictionary with at least a `status` key ('success' or 'error').
+- All Revit API write operations in Python are wrapped in `Transaction` blocks with explicit `Start()` and `Commit()`/`RollBack()` calls.
+- Coordinates in Python tools are consistently handled in Revit internal units (feet), often adjusting for Project Base Point (PBP) offsets when interacting with users or external systems.

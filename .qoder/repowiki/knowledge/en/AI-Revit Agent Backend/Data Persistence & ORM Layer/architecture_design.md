@@ -1,0 +1,4 @@
+- Configuration layer (`config.py`) uses Pydantic Settings to load environment variables and produce the async SQLite URL (`sqlite+aiosqlite://`).
+- Engine & session factory (`database.py`) create a module-level `AsyncEngine` and `async_sessionmaker`, exposing a FastAPI-compatible `get_db()` dependency that yields scoped `AsyncSession` instances with automatic commit/rollback.
+- ORM models (`models.py`) inherit from a shared `DeclarativeBase` and define four tables: `sessions`, `messages`, `provider_configs`, and `app_settings`, using UUID primary keys and UTC timestamps.
+- Migrations (`migrations.py`) run lightweight, idempotent column additions at startup by inspecting existing schema metadata, avoiding external migration tools like Alembic.

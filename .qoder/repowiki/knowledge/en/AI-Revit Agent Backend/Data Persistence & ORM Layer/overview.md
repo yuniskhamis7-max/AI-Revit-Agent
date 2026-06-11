@@ -1,0 +1,1 @@
+Provides async SQLite persistence via SQLAlchemy 2.0 with typed ORM models, session management, and idempotent schema migrations.

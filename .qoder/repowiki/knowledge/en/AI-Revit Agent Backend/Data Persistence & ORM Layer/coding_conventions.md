@@ -1,0 +1,3 @@
+- All ORM models use UUID v4 strings as primary keys via a shared `_uuid()` helper instead of auto-increment integers.
+- Timestamp columns (`created_at`, `updated_at`) default to UTC via a shared `_now()` helper and use `DateTime(timezone=True)` for timezone-aware storage.
+- Optional text fields in models are declared with `Mapped[Optional[str]]` and `nullable=True` to distinguish absent values from empty strings.

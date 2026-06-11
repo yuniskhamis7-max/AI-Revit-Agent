@@ -1,0 +1,5 @@
+- **Layered Orchestration**: The React frontend communicates with a FastAPI backend via REST/SSE, which dispatches commands to a C# Bridge Server running inside Revit's process.
+- **Thread-Safe Bridging**: The C# bridge marshals asynchronous HTTP requests onto Revit's single-threaded UI main thread using `IExternalEventHandler` and `AutoResetEvent` blockers.
+- **Dynamic Tool Discovery**: The backend lazily discovers available BIM tools from the bridge at startup, populating a shared registry that drives LLM function-calling schemas.
+- **Human-in-the-Loop Gate**: The backend pauses the agentic loop for destructive actions, streaming an approval request to the frontend before executing bridge commands.
+- **Unified Startup**: A root-level `run.bat` script orchestrates the concurrent launch of the Python backend and Node.js frontend, handling port cleanup and process management.

@@ -1,0 +1,1 @@
+React 19 with TypeScript, Vite for build/dev server, Zustand + Immer for state management, and react-markdown for rendering.

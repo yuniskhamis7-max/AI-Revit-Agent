@@ -1,0 +1,3 @@
+- State stores are defined using `create<State & Actions>()(immer(...))` pattern, separating immutable state shape and mutable actions interfaces.
+- API clients expose typed methods (e.g., `get<T>`, `post<T>`) that wrap a central `request` helper handling JSON serialization and error extraction.
+- Custom hooks (e.g., `useChat`) return objects containing callback functions (like `sendMessage`, `approve`) that drive side effects and store updates.

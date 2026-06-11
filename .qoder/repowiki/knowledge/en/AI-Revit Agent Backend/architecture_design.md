@@ -1,0 +1,4 @@
+- **Startup Orchestration**: `main.py` uses a FastAPI lifespan context to sequentially initialize the SQLite database, shared HTTP client, and tool registry by discovering schemas from the external Revit bridge.
+- **Agentic Loop & State Management**: `services/agent.py` drives the multi-turn LLM interaction, yielding SSE events. It manages stateful `ApprovalGate` objects in process memory to pause execution for human review of write operations, coordinated via the `/api/chat/approve` endpoint.
+- **Provider Abstraction**: A strict `AIProvider` interface (`providers/base.py`) decouples the agent logic from specific LLM SDKs (Gemini, OpenAI, etc.), allowing seamless provider swapping.
+- **Dynamic Tool Registry**: `services/tool_registry.py` maintains a runtime-discovered map of Revit tools, classifying them as read-only (auto-executed) or write-actions (approval-required) based on schema metadata or naming conventions.

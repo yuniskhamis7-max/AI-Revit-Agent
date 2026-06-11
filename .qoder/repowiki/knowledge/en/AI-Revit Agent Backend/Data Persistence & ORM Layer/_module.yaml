@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend/data_layer
+title: Data Persistence & ORM Layer
+scope:
+    - backend/models.py
+    - backend/database.py
+    - backend/migrations.py
+    - backend/config.py
+source_files: []
+depends_on: []
+related_to: []

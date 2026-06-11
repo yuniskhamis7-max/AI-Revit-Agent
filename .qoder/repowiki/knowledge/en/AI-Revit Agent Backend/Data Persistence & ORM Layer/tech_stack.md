@@ -1,0 +1,1 @@
+SQLAlchemy 2.0 with `aiosqlite` driver for async SQLite access; Pydantic Settings (`pydantic_settings`) for typed configuration loading from `.env` files.

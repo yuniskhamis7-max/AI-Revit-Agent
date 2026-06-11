@@ -1,0 +1,1 @@
+A React-based web interface for an AI agent that orchestrates Revit operations through chat, session management, and human-in-the-loop tool approval.

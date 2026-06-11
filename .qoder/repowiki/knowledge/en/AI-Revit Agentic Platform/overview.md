@@ -1,0 +1,1 @@
+Orchestrates a multi-layered agentic workflow bridging LLM providers to Autodesk Revit via a C# HTTP bridge, enforcing human-in-the-loop approval for destructive BIM actions.

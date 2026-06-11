@@ -1,0 +1,1 @@
+Orchestrates an agentic AI loop that bridges LLM providers with Autodesk Revit via a C# HTTP bridge, enforcing human-in-the-loop approval for destructive actions.

@@ -1,0 +1,1 @@
+Enables external AI agents to safely execute Revit API commands by bridging HTTP requests to Revit's main thread via a C# server and pyRevit extension.

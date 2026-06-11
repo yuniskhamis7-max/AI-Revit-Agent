@@ -1,0 +1,4 @@
+- Entry point: `src/main.tsx` mounts `<App />` (in `src/App.tsx`) which composes the layout using `SessionSidebar`, `ChatWindow`, `ProviderSelector`, `SettingsPanel`, and `ApprovalModal`.
+- State management: Uses Zustand with Immer middleware, split into focused slices (`sessionStore`, `messageStore`, `approvalStore`, `providerStore`, `uiStore`) with a legacy barrel re-export in `chatStore.ts`.
+- Data fetching: Custom hooks (`useChat`, `useSessions`) encapsulate API interactions. `src/api/client.ts` provides a generic `request` helper and an `openSSEStream` generator for Server-Sent Events.
+- Build & Dev: Vite (`vite.config.ts`) handles bundling and proxies `/api` requests to `localhost:8000` during development.

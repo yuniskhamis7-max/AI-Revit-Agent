@@ -1,0 +1,1 @@
+FastAPI, SQLAlchemy 2.0 (async), Pydantic Settings, httpx
