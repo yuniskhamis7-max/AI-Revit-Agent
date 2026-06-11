@@ -3,8 +3,8 @@
 Backend Configuration — Settings loaded from .env / environment variables.
 
 DEVELOPMENT_MODE toggle:
-  True  → auto-approve tools, open CORS, DEBUG logging, bridge soft-fail
-  False → approval gate enforced, restricted CORS, INFO logging, hard bridge errors
+  True  → open CORS, DEBUG logging, bridge soft-fail
+  False → restricted CORS, INFO logging, hard bridge errors
 """
 from __future__ import annotations
 
@@ -25,13 +25,9 @@ class Settings(BaseSettings):
 
     Attributes:
         development_mode: Master toggle for developer ergonomics. When True,
-            tools are auto-approved, CORS is open, logging is DEBUG, and bridge
-            failures are soft. Set to False for production deployments.
+            CORS is open, logging is DEBUG, and bridge failures are soft.
+            Set to False for production deployments.
         gemini_api_key:   API key for Google Gemini provider.
-        openai_api_key:   API key for OpenAI provider.
-        anthropic_api_key: API key for Anthropic Claude provider.
-        groq_api_key:     API key for Groq LPU provider.
-        openrouter_api_key: API key for OpenRouter meta-provider.
         default_provider: Fallback provider name when none is persisted in DB.
         default_model:    Fallback model ID when none is persisted in DB.
         agent_max_turns:  Maximum number of agent loop iterations per user turn.
@@ -60,18 +56,6 @@ class Settings(BaseSettings):
     # ── AI Provider Keys ─────────────────────────────────────────────────────
     gemini_api_key: str = ""
     """Google Gemini API key. Empty string means not configured via env."""
-
-    openai_api_key: str = ""
-    """OpenAI API key. Empty string means not configured via env."""
-
-    anthropic_api_key: str = ""
-    """Anthropic Claude API key. Empty string means not configured via env."""
-
-    groq_api_key: str = ""
-    """Groq LPU API key. Empty string means not configured via env."""
-
-    openrouter_api_key: str = ""
-    """OpenRouter API key. Empty string means not configured via env."""
 
     # Default provider + model used when none is persisted in the DB yet
     default_provider: str = "gemini"
@@ -126,17 +110,6 @@ class Settings(BaseSettings):
     # ── Database ─────────────────────────────────────────────────────────────
     database_path: str = "data/agent.db"
     """Relative path (from backend/) to the SQLite database file."""
-
-    @property
-    def database_url(self) -> str:
-        """
-        Constructs the full async SQLite connection URL.
-
-        Returns:
-            str: SQLAlchemy async URL, e.g. 'sqlite+aiosqlite:///...data/agent.db'
-        """
-        db_file = Path(__file__).parent / self.database_path
-        return f"sqlite+aiosqlite:///{db_file}"
 
     # ── CORS ─────────────────────────────────────────────────────────────────
     @property
