@@ -166,26 +166,64 @@ class LevelTools(object):
         levels = FilteredElementCollector(self.doc).OfClass(Level)
         levels_data = []
         
+        from Autodesk.Revit.DB import ViewSection, DatumExtentType
+        views = FilteredElementCollector(self.doc).OfClass(ViewSection).ToElements()
+        
         for lvl in levels:
-            # Determine the unique 3D bounding box coordinates of the level
-            lvl_bbox = lvl.get_BoundingBox(None)
-            if lvl_bbox:
-                lvl_min_x = lvl_bbox.Min.X
-                lvl_min_y = lvl_bbox.Min.Y
-                lvl_max_x = lvl_bbox.Max.X
-                lvl_max_y = lvl_bbox.Max.Y
-            elif has_geometry:
-                # Fallback to model footprint envelope
-                lvl_min_x = min_x
-                lvl_min_y = min_y
-                lvl_max_x = max_x
-                lvl_max_y = max_y
-            else:
-                # Sane absolute fallback bounds
-                lvl_min_x = 0.0
-                lvl_min_y = 0.0
-                lvl_max_x = 100.0
-                lvl_max_y = 100.0
+            # Query the actual 3D model curves of the Level in all elevation/section views to find its true bounds
+            lvl_min_x = lvl_min_y = float('inf')
+            lvl_max_x = lvl_max_y = float('-inf')
+            found_bounds = False
+            
+            for v in views:
+                if v.IsTemplate:
+                    continue
+                try:
+                    if not lvl.CanBeVisibleInView(v):
+                        continue
+                except Exception:
+                    continue
+                
+                try:
+                    # Attempt to get Model curves first, then fallback to ViewSpecific curves
+                    curves = lvl.GetCurvesInView(DatumExtentType.Model, v)
+                    if not curves:
+                        curves = lvl.GetCurvesInView(DatumExtentType.ViewSpecific, v)
+                        
+                    if curves:
+                        for c in curves:
+                            if c.IsBound:
+                                pt0 = c.GetEndPoint(0)
+                                pt1 = c.GetEndPoint(1)
+                                
+                                lvl_min_x = min(lvl_min_x, pt0.X, pt1.X)
+                                lvl_min_y = min(lvl_min_y, pt0.Y, pt1.Y)
+                                lvl_max_x = max(lvl_max_x, pt0.X, pt1.X)
+                                lvl_max_y = max(lvl_max_y, pt0.Y, pt1.Y)
+                                found_bounds = True
+                except Exception:
+                    continue
+
+            if not found_bounds:
+                # Determine the unique 3D bounding box coordinates of the level if no view curves found
+                lvl_bbox = lvl.get_BoundingBox(None)
+                if lvl_bbox:
+                    lvl_min_x = lvl_bbox.Min.X
+                    lvl_min_y = lvl_bbox.Min.Y
+                    lvl_max_x = lvl_bbox.Max.X
+                    lvl_max_y = lvl_bbox.Max.Y
+                elif has_geometry:
+                    # Fallback to model footprint envelope
+                    lvl_min_x = min_x
+                    lvl_min_y = min_y
+                    lvl_max_x = max_x
+                    lvl_max_y = max_y
+                else:
+                    # Sane absolute fallback bounds
+                    lvl_min_x = 0.0
+                    lvl_min_y = 0.0
+                    lvl_max_x = 100.0
+                    lvl_max_y = 100.0
 
             start_coords = OrderedDict([
                 ("x", round(lvl_min_x, 3)),

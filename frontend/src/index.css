@@ -413,6 +413,50 @@ body::before {
   font-size: 1.3rem;
 }
 
+.header-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.header-export-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.header-export-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border-active);
+  color: var(--color-text-primary);
+  transform: translateY(-1px);
+}
+
+.header-export-btn:active {
+  transform: translateY(1px);
+}
+
+.header-export-btn svg {
+  color: var(--color-text-secondary);
+  transition: color 0.2s ease;
+}
+
+.header-export-btn:hover svg {
+  color: var(--accent-primary);
+  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.5));
+}
+
 /* ── Provider Selector ───────────────────────────────────────────────────── */
 .provider-selector-container {
   display: flex;

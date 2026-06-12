@@ -301,7 +301,11 @@ ai_revit_agent/
 │           └── Panel.panel/
 │               └── StartBridge.pushbutton/
 │                   ├── bundle.yaml          # pyRevit UI button declaration
-│                   ├── script.py            # IronPython tool logic & routing
+│                   ├── script.py            # IronPython bridge bootstrapping
+│                   ├── tools/               # Modular Python tool definitions
+│                   │   ├── __init__.py      # Tool registry, hot-reloading & routing entrypoint
+│                   │   ├── grid_tools.py    # Grid query/modify transaction operations
+│                   │   └── level_tools.py   # Level elevation/boundary projection operations
 │                   └── RevitAgentBridge.dll # Built C# bridge assembly
 ├── run.bat                         # Windows automated startup launcher
 └── .gitignore                      # Git exclusion rules
@@ -455,78 +459,70 @@ The backend is configured via `backend/.env`. Key parameters:
 
 ## 9. Developer's Guide (How to Add Custom Tools)
 
-### IronPython 2.7 Constraints & GC Closures
+### Modular Registry & Submodules
 
-The C# Bridge invokes the Python router in a separate runtime thread inside Revit. Due to the way IronPython garbage-collects objects after execution, **all sub-routines, imports, and variables must be nested inside the `python_execution_router` function**.
+The project organizes all Revit commands into the `tools/` package. The `__init__.py` file registers the tools and handles routing, while specific modules (e.g. `grid_tools.py`, `level_tools.py`, or a new custom file) contain the implementation classes.
 
-> [!WARNING]
-> Do not import modules or declare variables at the root level of `script.py`. They will be garbage collected, resulting in `NameError` exceptions on subsequent tool calls.
+To add a new tool (e.g., query room properties):
 
----
-
-### Adding a Custom Tool Step-by-Step
-
-To add a new tool (e.g., query room properties), you only need to modify one file: `extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/script.py`.
-
-#### 1. Add your tool function inside `python_execution_router`:
+#### 1. Define the tool function in a module:
+You can implement the logic directly in a new class or module under `tools/`, or add it to an existing module. For example, create `tools/room_tools.py`:
 
 ```python
-def python_execution_router(action, parameters):
-    import json
-    from Autodesk.Revit.DB import Transaction, FilteredElementCollector, Room
+# -*- coding: utf-8 -*-
+class RoomTools(object):
+    def __init__(self, doc):
+        self.doc = doc
 
-    # --- YOUR NEW TOOL DEFINITION ---
-    def tool_fetch_rooms(doc, params):
-        try:
-            collector = FilteredElementCollector(doc).OfClass(Room)
-            rooms_data = []
-            for r in collector:
-                rooms_data.append({
-                    "id": r.Id.ToString(),
-                    "name": r.Name,
-                    "number": r.Number,
-                    "area": r.Area
-                })
-            return {"status": "success", "rooms": rooms_data}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+    def fetch_rooms(self):
+        from Autodesk.Revit.DB import FilteredElementCollector, BuiltInCategory
+        from collections import OrderedDict
+        
+        rooms = FilteredElementCollector(self.doc).OfCategory(BuiltInCategory.OST_Rooms).WhereElementIsNotElementType().ToElements()
+        rooms_data = []
+        for r in rooms:
+            rooms_data.append(OrderedDict([
+                ("id", r.UniqueId),
+                ("name", r.Name),
+                ("number", r.Number),
+                ("area", round(r.Area, 3))
+            ]))
+        return OrderedDict([
+            ("status", "success"),
+            ("message", "Successfully fetched rooms."),
+            ("data", OrderedDict([("rooms", rooms_data)]))
+        ])
 ```
 
-#### 2. Register the routing hook:
-
-Scroll down inside `python_execution_router` to the dispatcher block and add your action keyword:
+#### 2. Register the tool in `tools/__init__.py`:
+Import your logic and register it in `__init__.py` using the `@registry.register` decorator. Define the tool parameters and description:
 
 ```python
-    # Dispatch tools
-    if action == "fetch_project_info":
-        return tool_fetch_project_info(doc, parameters)
-    # ... other tools ...
-    elif action == "fetch_rooms":
-        return tool_fetch_rooms(doc, parameters)
+@registry.register(
+    name="fetch_rooms",
+    description="Returns a list of all rooms in the current Revit model including names, area, and numbers.",
+    custom_instructions="Query this to inspect room boundaries and sizes before placing equipment or partitions.",
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+)
+def fetch_rooms(doc, ui_app, tool_input):
+    from tools.room_tools import RoomTools
+    return RoomTools(doc).fetch_rooms()
 ```
 
-#### 3. Update the tool schema:
-
-Define the tool parameters in the JSON schemas inside `script.py` so Gemini understands its capabilities, arguments, and return types:
+#### 3. Enable Hot-Reloading for Development:
+Add your module to the hot-reloading block inside the `execute` method of `ToolRegistry` (in `tools/__init__.py`) so edits are picked up instantly without restarting the bridge:
 
 ```python
-    # Expose tools list
-    tools_definition = [
-        {
-            "name": "fetch_rooms",
-            "description": "Returns a list of all rooms in the current Revit model including names, area, and numbers.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    ]
+            if 'tools.room_tools' in sys.modules:
+                reload(sys.modules['tools.room_tools'])
 ```
 
-#### 4. Restart:
-* Click the **Start Bridge** ribbon button inside Revit to reload the script parameters.
-* Restart your backend FastAPI server. The backend will automatically cache the new tool schema and make it available for the Gemini agent.
+#### 4. Discovery:
+The FastAPI backend will automatically discover the new tool schema on its next startup or when you click **Refresh Tools** in the web settings panel. Because of hot-reloading, you do not need to toggle or restart the pyRevit bridge button inside Revit to test python code edits.
 
 ---
 

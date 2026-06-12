@@ -90,7 +90,10 @@ ai_revit_agent/
 │               └── StartBridge.pushbutton/
 │                   ├── bundle.yaml          # Ribbon UI configuration definition
 │                   ├── script.py            # Event handler bootstrapping & server start
-│                   ├── tools.py             # Internal Revit tool definitions & ToolRegistry
+│                   ├── tools/               # Modular Python tool definitions
+│                   │   ├── __init__.py      # Tool registry, hot-reloading & routing entrypoint
+│                   │   ├── grid_tools.py    # Grid database query and edit transaction operations
+│                   │   └── level_tools.py   # Level elevation projection & view boundary operations
 │                   └── RevitAgentBridge.dll # Compiled C# Bridge binary (copied post-build)
 └── frontend/                       # Vite + React + TypeScript App
     ├── src/
@@ -364,23 +367,25 @@ The C# project compiles down to `RevitAgentBridge.dll`. It acts as the thread ma
   5. Instantiates the `BridgeServer` and starts the HTTP loop on port `8080`.
   6. Registers the active server in `BridgeRegistry.ActiveServer`.
 
-* **[tools.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/tools.py)**: Defines the Revit commands.
-  - **`ToolRegistry`**: Manages Revit tools. Uses a decorator pattern:
-    ```python
-    @registry.register(name="create_grid", description="...", parameters={...})
-    def create_grid(doc, ui_app, tool_input):
-        # Implementation...
-    ```
-  - **`execute(ui_app, payload_str)`**: Parsed entry point. Evaluates the requested tool name and passes control to the registered Python handler.
+* **[tools/](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/tools/)**: Package containing the Revit tool logic.
+  * **[__init__.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/tools/__init__.py)**: 
+    - Defines the `ToolRegistry` which manages Revit tools via a decorator pattern:
+      ```python
+      @registry.register(name="create_grid", description="...", parameters={...})
+      def create_grid(doc, ui_app, tool_input):
+          # Implementation...
+      ```
+    - Implements **Hot-Reloading** inside the `execute` dispatcher: on every request, it checks for edits in submodules (`level_tools` and `grid_tools`) and executes a Python `reload()` to pick up updates dynamically without restarting the bridge.
+  * **[grid_tools.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/tools/grid_tools.py)**: Encapsulates all query and modification operations for Revit Grids.
+  * **[level_tools.py](file:///d:/Construction/Projects/ai_revit_agent/extension/AI_Agent.extension/AI_Agent.tab/Panel.panel/StartBridge.pushbutton/tools/level_tools.py)**: Encapsulates all query and modification operations for Revit Levels.
 
 ---
 
-### 4.3 Core Revit Tools in `tools.py`
+### 4.3 Core Revit Tools
 
 #### 1. `fetch_levels(doc, ui_app, tool_input)`
-Retrieves level details and calculates the model's footprint boundaries.
-* **Footprint Calculation**: Loops through structural bounding boxes (columns, foundations, generic models, grids) to determine boundary points (`min_x, min_y, max_x, max_y`).
-* **Visual Coordinates**: Maps these boundary coordinates to the level's `model_extent_start` and `model_extent_end`. This ensures that gridlines and levels display correctly within Revit's model limits.
+Retrieves level details and calculates the model's footprint boundaries dynamically.
+* **Precise Boundary Curve Retrieval**: Rather than falling back to the overall model footprint envelope, it queries the actual visual 2D and 3D level lines in all elevation and section views using `GetCurvesInView(DatumExtentType.Model, view)` and `GetCurvesInView(DatumExtentType.ViewSpecific, view)`. This handles stepped buildings and levels with different visual extents correctly.
 
 #### 2. `fetch_grids(doc, ui_app, tool_input)`
 Queries all grids. Determines their type (linear vs curved) and coordinates, returning detailed JSON outputs.
@@ -395,13 +400,19 @@ Creates a linear grid.
       line = Line.CreateBound(start_pt, end_pt)
       new_grid = Grid.Create(doc, line)
       new_grid.Name = name
-      new_grid.Maximize3DExtents()
+      # Set curves and vertical extents so it intersects all levels and is visible on floor plans
+      new_grid.SetCurveInView(DatumExtentType.Model, view, line)
+      new_grid.SetVerticalExtents(bottom, top)
       new_grid.Pinned = True
       trans.Commit()
   ```
 
 #### 4. `modify_grid(doc, ui_app, tool_input)`
-Modifies a grid's coordinates or name. Temporarily unpins the element during updates, then re-pins it afterwards.
+Modifies a grid's coordinates or name. Since `Grid.Curve` is read-only in the Revit API, this implements the **delete-and-recreate** pattern:
+1. Temporarily renames the old grid (appending `_temp_<id>`) to avoid naming collisions.
+2. Unpins and deletes the old grid.
+3. Re-creates the grid line at the target coordinates.
+4. Restores the target Name and Pinned status.
 
 #### 5. `delete_grid(doc, ui_app, tool_input)`
 Unpins and deletes the specified grid.
@@ -412,7 +423,7 @@ Creates a datum level at a specified elevation.
 * Alternatively, applies coordinate bounds across views using `apply_level_extents_to_views()`.
 
 #### 7. `modify_level(doc, ui_app, tool_input)`
-Modifies a level's height, coordinates, or name.
+Modifies a level's height, coordinates, or name. Translates 3D extents boundaries into elevation and section views by creating and applying the corresponding view curves.
 
 #### 8. `delete_level(doc, ui_app, tool_input)`
 Unpins and deletes a level.

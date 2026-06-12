@@ -88,23 +88,34 @@ class GridTools(object):
             ("data", OrderedDict([("grids", grids_data)]))
         ])
 
-    def create(self, name, start_pt, end_pt):
+    def create(self, name, start_pt, end_pt, view=None):
         """Creates a new linear grid line in the document.
         
         Args:
             name (str): Unique label for the new grid line.
             start_pt (XYZ): The starting XYZ coordinates (feet).
             end_pt (XYZ): The ending XYZ coordinates (feet).
+            view (Autodesk.Revit.DB.View, optional): The active document view.
             
         Returns:
             dict: Structured success/error response.
         """
-        from Autodesk.Revit.DB import Transaction, Line, Grid, FilteredElementCollector
+        from Autodesk.Revit.DB import Transaction, Line, Grid, FilteredElementCollector, Level
         from collections import OrderedDict
 
         for g in FilteredElementCollector(self.doc).OfClass(Grid):
             if g.Name.lower() == name.lower():
                 return {"status": "error", "message": "Grid name '{}' already exists.".format(name)}
+
+        # Determine vertical extents based on all document levels to ensure grid intersects them vertically
+        levels = FilteredElementCollector(self.doc).OfClass(Level).WhereElementIsNotElementType().ToElements()
+        if levels:
+            elevations = [l.Elevation for l in levels]
+            bottom = min(elevations) - 10.0
+            top = max(elevations) + 10.0
+        else:
+            bottom = -20.0
+            top = 150.0
 
         with Transaction(self.doc, "Agent - Create Grid") as trans:
             trans.Start()
@@ -112,7 +123,18 @@ class GridTools(object):
                 line = Line.CreateBound(start_pt, end_pt)
                 new_grid = Grid.Create(self.doc, line)
                 new_grid.Name = name
-                new_grid.Maximize3DExtents()
+                
+                # Explicitly override Revit's default automatic extent length with the exact input bounds
+                if view:
+                    try:
+                        from Autodesk.Revit.DB import DatumExtentType, DatumEnds
+                        new_grid.SetDatumExtentType(DatumEnds.End0, view, DatumExtentType.Model)
+                        new_grid.SetDatumExtentType(DatumEnds.End1, view, DatumExtentType.Model)
+                        new_grid.SetCurveInView(DatumExtentType.Model, view, line)
+                    except Exception:
+                        pass
+                        
+                new_grid.SetVerticalExtents(bottom, top)
                 new_grid.Pinned = True
                 trans.Commit()
                 
@@ -125,7 +147,7 @@ class GridTools(object):
                 trans.RollBack()
                 return {"status": "error", "message": "Failed to create grid: " + str(ex)}
 
-    def modify(self, grid_id, name=None, start_pt=None, end_pt=None):
+    def modify(self, grid_id, name=None, start_pt=None, end_pt=None, view=None):
         """Modifies coordinates and/or renames an existing grid line.
         
         Args:
@@ -133,35 +155,74 @@ class GridTools(object):
             name (str, optional): New grid name/label.
             start_pt (XYZ, optional): New start coordinates.
             end_pt (XYZ, optional): New end coordinates.
+            view (Autodesk.Revit.DB.View, optional): The active document view.
             
         Returns:
             dict: Structured success/error response.
         """
-        from Autodesk.Revit.DB import Transaction, Line, Grid
+        from Autodesk.Revit.DB import Transaction, Line, Grid, FilteredElementCollector, Level
         from collections import OrderedDict
 
         grid = self.doc.GetElement(grid_id)
         if not grid or not isinstance(grid, Grid):
             return {"status": "error", "message": "Grid element not found."}
 
+        # Determine vertical extents based on all document levels to ensure grid intersects them vertically
+        levels = FilteredElementCollector(self.doc).OfClass(Level).WhereElementIsNotElementType().ToElements()
+        if levels:
+            elevations = [l.Elevation for l in levels]
+            bottom = min(elevations) - 10.0
+            top = max(elevations) + 10.0
+        else:
+            bottom = -20.0
+            top = 150.0
+
         with Transaction(self.doc, "Agent - Modify Grid") as trans:
             trans.Start()
             try:
-                if start_pt is not None and end_pt is not None:
-                    new_line = Line.CreateBound(start_pt, end_pt)
-                    was_pinned = grid.Pinned
-                    grid.Pinned = False
-                    grid.Curve = new_line
-                    grid.Pinned = was_pinned
+                final_name = name if name else grid.Name
+                final_id = grid.UniqueId
 
-                if name and name != grid.Name:
-                    grid.Name = str(name)
+                if start_pt is not None and end_pt is not None:
+                    # Store original properties
+                    old_name = grid.Name
+                    was_pinned = grid.Pinned
+                    
+                    # Rename old grid to avoid name collision when creating the new grid
+                    grid.Name = old_name + "_temp_" + str(grid.Id.IntegerValue)
+                    
+                    # Unpin and delete the old grid
+                    grid.Pinned = False
+                    self.doc.Delete(grid.Id)
+                    
+                    # Create the new grid with the updated coordinates
+                    new_line = Line.CreateBound(start_pt, end_pt)
+                    new_grid = Grid.Create(self.doc, new_line)
+                    new_grid.Name = final_name
+                    
+                    # Explicitly override Revit's default automatic extent length with the exact input bounds
+                    if view:
+                        try:
+                            from Autodesk.Revit.DB import DatumExtentType, DatumEnds
+                            new_grid.SetDatumExtentType(DatumEnds.End0, view, DatumExtentType.Model)
+                            new_grid.SetDatumExtentType(DatumEnds.End1, view, DatumExtentType.Model)
+                            new_grid.SetCurveInView(DatumExtentType.Model, view, new_line)
+                        except Exception:
+                            pass
+                            
+                    new_grid.SetVerticalExtents(bottom, top)
+                    new_grid.Pinned = was_pinned
+                    final_id = new_grid.UniqueId
+                else:
+                    # Just rename if coordinates are not changed
+                    if name and name != grid.Name:
+                        grid.Name = str(name)
 
                 trans.Commit()
                 return OrderedDict([
                     ("status", "success"),
-                    ("message", "Grid '{}' successfully modified.".format(grid.Name)),
-                    ("data", OrderedDict([("element_id", grid.UniqueId)]))
+                    ("message", "Grid '{}' successfully modified.".format(final_name)),
+                    ("data", OrderedDict([("element_id", final_id)]))
                 ])
             except Exception as ex:
                 trans.RollBack()

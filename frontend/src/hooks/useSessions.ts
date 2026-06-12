@@ -46,7 +46,9 @@ export function useSessions() {
   const loadActiveSessionMessages = useCallback(async (id: string) => {
     try {
       const detail = await sessionsApi.get(id);
-      const chatMessages: ChatMessage[] = detail.messages.map((m: any) => {
+      const chatMessages: ChatMessage[] = detail.messages
+        .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+        .map((m: any) => {
         let toolCalls: ToolCall[] | undefined = undefined;
         if (m.tool_calls) {
           try {

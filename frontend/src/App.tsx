@@ -101,6 +101,35 @@ const App: React.FC = () => {
 
   const activeSession = sessions.find((s: Session) => s.id === activeSessionId);
 
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopySession = useCallback(async () => {
+    if (!activeSessionId) return;
+    try {
+      const response = await fetch(`/api/sessions/${activeSessionId}/export?format=markdown`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch session export data');
+      }
+      const text = await response.text();
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy session chat:', err);
+    }
+  }, [activeSessionId]);
+
+  const handleExportSession = useCallback(() => {
+    if (!activeSessionId) return;
+    const url = `/api/sessions/${activeSessionId}/export`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `session_export_${activeSessionId}.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [activeSessionId]);
+
   return (
     <div className={`app-container ${sidebarOpen ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
       {/* Left Sidebar */}
@@ -122,6 +151,30 @@ const App: React.FC = () => {
             <h1 className="header-title">
               {activeSession ? activeSession.name : 'AI Revit Orchestrator'}
             </h1>
+            {activeSession && (
+              <div className="header-actions-group">
+                <button
+                  className="header-export-btn header-copy-btn"
+                  onClick={handleCopySession}
+                  title="Copy Chat History to Clipboard"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                    <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                  </svg>
+                  <span>{copied ? 'Copied!' : 'Copy Chat'}</span>
+                </button>
+                <button
+                  className="header-export-btn"
+                  onClick={handleExportSession}
+                  title="Export Chat History as Markdown"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                    <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+                  </svg>
+                  <span>Export Chat</span>
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="header-right">

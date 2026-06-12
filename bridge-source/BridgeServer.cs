@@ -26,7 +26,7 @@ namespace RevitAgentBridge
     /// Represents a single tool execution request queued from the HTTP listener
     /// to be processed on Revit's main thread via the ExternalEvent mechanism.
     /// </summary>
-    public class AgentTask
+    public class AgentTask : IDisposable
     {
         /// <summary>
         /// The raw JSON payload from the HTTP request body.
@@ -55,6 +55,14 @@ namespace RevitAgentBridge
             RequestJson = json ?? "{}";
             ResultJson = "{}";
             CompletionEvent = new AutoResetEvent(false);
+        }
+
+        /// <summary>
+        /// Releases the underlying WaitHandle (AutoResetEvent) resources.
+        /// </summary>
+        public void Dispose()
+        {
+            CompletionEvent?.Close();
         }
     }
 
@@ -197,11 +205,21 @@ namespace RevitAgentBridge
         /// <param name="json">The JSON string to write as the response body.</param>
         private void WriteJsonResponse(HttpListenerContext context, string json)
         {
-            byte[] buffer = Encoding.UTF8.GetBytes(json);
-            context.Response.ContentType = "application/json";
-            context.Response.ContentLength64 = buffer.Length;
-            context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-            context.Response.OutputStream.Close();
+            try
+            {
+                byte[] buffer = Encoding.UTF8.GetBytes(json);
+                context.Response.ContentType = "application/json";
+                context.Response.ContentLength64 = buffer.Length;
+                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+            }
+            finally
+            {
+                try
+                {
+                    context.Response.Close();
+                }
+                catch { }
+            }
         }
 
         /// <summary>
@@ -216,9 +234,10 @@ namespace RevitAgentBridge
         {
             while (_isRunning && _listener != null && _listener.IsListening)
             {
+                HttpListenerContext context = null;
                 try
                 {
-                    HttpListenerContext context = _listener.GetContext();
+                    context = _listener.GetContext();
                     HttpListenerRequest request = context.Request;
                     string path = request.Url.AbsolutePath.TrimEnd('/').ToLowerInvariant();
 
@@ -227,18 +246,20 @@ namespace RevitAgentBridge
                         // GET /tools/ — inject a get_tools request into the Python router
                         // so the daemon can auto-discover all registered tool schemas.
                         string getToolsPayload = "{\"tool\":\"get_tools\",\"input\":{}}";
-                        var toolsTask = new AgentTask(getToolsPayload);
-                        _handler.EnqueueTask(toolsTask);
-                        _externalEvent.Raise();
-                        
-                        if (toolsTask.CompletionEvent.WaitOne(120000))
+                        using (var toolsTask = new AgentTask(getToolsPayload))
                         {
-                            WriteJsonResponse(context, toolsTask.ResultJson);
-                        }
-                        else
-                        {
-                            context.Response.StatusCode = 504;
-                            WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 120 seconds.\"}");
+                            _handler.EnqueueTask(toolsTask);
+                            _externalEvent.Raise();
+                            
+                            if (toolsTask.CompletionEvent.WaitOne(120000))
+                            {
+                                WriteJsonResponse(context, toolsTask.ResultJson);
+                            }
+                            else
+                            {
+                                context.Response.StatusCode = 504;
+                                WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 120 seconds.\"}");
+                            }
                         }
                     }
                     else if (path == "/execute")
@@ -250,18 +271,20 @@ namespace RevitAgentBridge
                             jsonPayload = reader.ReadToEnd();
                         }
 
-                        var task = new AgentTask(jsonPayload);
-                        _handler.EnqueueTask(task);
-                        _externalEvent.Raise();
+                        using (var task = new AgentTask(jsonPayload))
+                        {
+                            _handler.EnqueueTask(task);
+                            _externalEvent.Raise();
 
-                        if (task.CompletionEvent.WaitOne(120000))
-                        {
-                            WriteJsonResponse(context, task.ResultJson);
-                        }
-                        else
-                        {
-                            context.Response.StatusCode = 504;
-                            WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 120 seconds.\"}");
+                            if (task.CompletionEvent.WaitOne(120000))
+                            {
+                                WriteJsonResponse(context, task.ResultJson);
+                            }
+                            else
+                            {
+                                context.Response.StatusCode = 504;
+                                WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Revit request timed out after 120 seconds.\"}");
+                            }
                         }
                     }
                     else
@@ -274,9 +297,21 @@ namespace RevitAgentBridge
                 {
                     break;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    // Prevent thread crash on unexpected errors
+                    // Prevent thread crash on unexpected errors and ensure context is closed
+                    if (context != null)
+                    {
+                        try
+                        {
+                            context.Response.StatusCode = 500;
+                            WriteJsonResponse(context, "{\"status\":\"error\",\"message\":\"Bridge internal exception: " + ex.Message + "\"}");
+                        }
+                        catch
+                        {
+                            try { context.Response.Close(); } catch { }
+                        }
+                    }
                 }
             }
         }

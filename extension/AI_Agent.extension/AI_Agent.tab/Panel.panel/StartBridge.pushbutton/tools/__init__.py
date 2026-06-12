@@ -55,6 +55,17 @@ class ToolRegistry(object):
                 })
 
             doc = ui_app.ActiveUIDocument.Document
+            
+            # Dynamically reload submodules to pick up code edits instantly
+            try:
+                import sys
+                if 'tools.level_tools' in sys.modules:
+                    reload(sys.modules['tools.level_tools'])
+                if 'tools.grid_tools' in sys.modules:
+                    reload(sys.modules['tools.grid_tools'])
+            except Exception:
+                pass
+                
             tool_fn = self._tools[tool_name]["callable"]
             
             result = tool_fn(doc, ui_app, tool_input)
@@ -127,7 +138,8 @@ def create_grid(doc, ui_app, tool_input):
     start_pt = XYZ(float(tool_input["start_x"]), float(tool_input["start_y"]), 0.0)
     end_pt = XYZ(float(tool_input["end_x"]), float(tool_input["end_y"]), 0.0)
     
-    return GridTools(doc).create(name, start_pt, end_pt)
+    view = ui_app.ActiveUIDocument.ActiveView
+    return GridTools(doc).create(name, start_pt, end_pt, view)
 
 
 @registry.register(
@@ -161,7 +173,8 @@ def modify_grid(doc, ui_app, tool_input):
         start_pt = XYZ(float(tool_input["start_x"]), float(tool_input["start_y"]), 0.0)
         end_pt = XYZ(float(tool_input["end_x"]), float(tool_input["end_y"]), 0.0)
         
-    return GridTools(doc).modify(grid_id, name=name, start_pt=start_pt, end_pt=end_pt)
+    view = ui_app.ActiveUIDocument.ActiveView
+    return GridTools(doc).modify(grid_id, name=name, start_pt=start_pt, end_pt=end_pt, view=view)
 
 
 @registry.register(

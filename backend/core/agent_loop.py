@@ -184,7 +184,7 @@ class AgentOrchestrator:
 
                 yield {
                     "type": "agent_thought",
-                    "content": f"[agent thought] Tool {tool_name} returned: {result}"
+                    "content": f"[agent thought] Tool {tool_name} returned: {_summarize_result(result)}"
                 }
 
                 yield {
@@ -205,6 +205,38 @@ class AgentOrchestrator:
 
         if turn >= self.max_turns:
             yield {"type": "error", "content": "Agent exceeded maximum turn limit"}
+
+
+def _summarize_result(result: Any) -> str:
+    """Creates a clean, human-readable summary of a tool result dictionary."""
+    if not isinstance(result, dict):
+        val = str(result)
+        return val[:200] + "..." if len(val) > 200 else val
+
+    status = result.get("status")
+    message = result.get("message")
+    summary_parts = []
+    if status:
+        summary_parts.append(f"status='{status}'")
+    if message:
+        summary_parts.append(f"message='{message}'")
+
+    # Check for lists in data to summarize count
+    data = result.get("data")
+    if isinstance(data, dict):
+        counts = []
+        for k, v in data.items():
+            if isinstance(v, list):
+                counts.append(f"{len(v)} {k}")
+        if counts:
+            summary_parts.append(f"data=({', '.join(counts)})")
+
+    if not summary_parts:
+        # Fallback to a truncated string representation of the dict
+        val = str(result)
+        return val[:200] + "..." if len(val) > 200 else val
+
+    return ", ".join(summary_parts)
 
 
 def _json_dumps(obj: Any) -> str:
