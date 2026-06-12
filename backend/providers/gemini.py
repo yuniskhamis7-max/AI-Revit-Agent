@@ -116,9 +116,11 @@ def _build_function_declarations(tool_schemas: list[dict]) -> list[types.Functio
         name = schema["name"]
         description = schema["description"]
         parameters = schema.get("parameters", {})
-        agent_instructions = schema.get("agent_instructions", "")
-        if agent_instructions:
-            description = description + "\n\nBEFORE CALLING: " + agent_instructions
+
+        # Support both custom_instructions and legacy agent_instructions
+        custom_instructions = schema.get("custom_instructions") or schema.get("agent_instructions", "")
+        if custom_instructions:
+            description = description + "\n\nCUSTOM INSTRUCTIONS: " + custom_instructions
 
         declarations.append(
             types.FunctionDeclaration(

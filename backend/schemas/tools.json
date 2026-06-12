@@ -4,9 +4,61 @@
     "description": "Fetches all gridlines in the project, including their unique IDs, labels, endpoints, and curvature details.",
     "parameters": {
       "properties": {},
-      "type": "object",
-      "required": []
-    }
+      "required": [],
+      "type": "object"
+    },
+    "element": "grid",
+    "custom_instructions": "Query this to understand the existing grid layout, spacing pattern, and naming convention before editing."
+  },
+  {
+    "name": "modify_level",
+    "description": "Modifies height elevation, renames, or updates the 3D/2D extents of an existing level.",
+    "parameters": {
+      "properties": {
+        "reference_level_id": {
+          "type": "string",
+          "description": "Optional UniqueId of an existing level to copy extents from."
+        },
+        "maximize_extents": {
+          "type": "boolean",
+          "description": "Optional option to maximize 3D extents."
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional new name for the level."
+        },
+        "min_x": {
+          "type": "number",
+          "description": "Optional new minimum X boundary in feet."
+        },
+        "max_x": {
+          "type": "number",
+          "description": "Optional new maximum X boundary in feet."
+        },
+        "level_id": {
+          "type": "string",
+          "description": "The UniqueId of the target level."
+        },
+        "elevation": {
+          "type": "number",
+          "description": "Optional new elevation height in feet."
+        },
+        "min_y": {
+          "type": "number",
+          "description": "Optional new minimum Y boundary in feet."
+        },
+        "max_y": {
+          "type": "number",
+          "description": "Optional new maximum Y boundary in feet."
+        }
+      },
+      "required": [
+        "level_id"
+      ],
+      "type": "object"
+    },
+    "element": "level",
+    "custom_instructions": "Modifying levels updates all elements attached to the level. Exercise caution when altering heights."
   },
   {
     "name": "delete_grid",
@@ -18,140 +70,62 @@
           "description": "The UniqueId of the target grid."
         }
       },
-      "type": "object",
       "required": [
         "grid_id"
-      ]
-    }
+      ],
+      "type": "object"
+    },
+    "element": "grid",
+    "custom_instructions": "Be careful when deleting grids as they may have elements dependent on them."
   },
   {
-    "name": "create_grid",
-    "description": "Creates a new linear gridline in the project.",
+    "name": "modify_grid",
+    "description": "Modifies coordinates or renames an existing gridline.",
     "parameters": {
       "properties": {
-        "name": {
+        "grid_id": {
           "type": "string",
-          "description": "Unique grid label (e.g., 'A', '1')."
+          "description": "The UniqueId of the grid to edit."
         },
         "start_x": {
           "type": "number",
-          "description": "Start X coordinate in feet."
+          "description": "Optional new start X (feet)."
         },
-        "start_y": {
-          "type": "number",
-          "description": "Start Y coordinate in feet."
-        },
-        "end_y": {
-          "type": "number",
-          "description": "End Y coordinate in feet."
+        "name": {
+          "type": "string",
+          "description": "Optional new name for the grid."
         },
         "end_x": {
           "type": "number",
-          "description": "End X coordinate in feet."
+          "description": "Optional new end X (feet)."
+        },
+        "end_y": {
+          "type": "number",
+          "description": "Optional new end Y (feet)."
+        },
+        "start_y": {
+          "type": "number",
+          "description": "Optional new start Y (feet)."
         }
       },
-      "type": "object",
       "required": [
-        "name",
-        "start_x",
-        "start_y",
-        "end_x",
-        "end_y"
-      ]
-    }
+        "grid_id"
+      ],
+      "type": "object"
+    },
+    "element": "grid",
+    "custom_instructions": "Grid curves will only be modified if all start/end coordinates are provided. Otherwise, only rename applies."
   },
   {
-    "name": "create_level",
-    "description": "Creates a new horizontal datum level with options to configure custom visual extents.",
+    "name": "fetch_levels",
+    "description": "Fetches all levels in the project, including their absolute 3D model boundary extents.",
     "parameters": {
-      "properties": {
-        "maximize_extents": {
-          "type": "boolean",
-          "description": "Option to maximize the default 3D extents. Defaults to True."
-        },
-        "max_y": {
-          "type": "number",
-          "description": "Optional maximum Y visual boundary in feet."
-        },
-        "reference_level_id": {
-          "type": "string",
-          "description": "Optional UniqueId of an existing level to copy extents from across views."
-        },
-        "name": {
-          "type": "string",
-          "description": "Unique name of the level (e.g., 'Level 3')."
-        },
-        "min_x": {
-          "type": "number",
-          "description": "Optional minimum X visual boundary in feet."
-        },
-        "elevation": {
-          "type": "number",
-          "description": "Elevation height in feet."
-        },
-        "max_x": {
-          "type": "number",
-          "description": "Optional maximum X visual boundary in feet."
-        },
-        "min_y": {
-          "type": "number",
-          "description": "Optional minimum Y visual boundary in feet."
-        }
-      },
-      "type": "object",
-      "required": [
-        "name",
-        "elevation"
-      ]
-    }
-  },
-  {
-    "name": "modify_level",
-    "description": "Modifies height elevation, renames, or updates the 3D/2D extents of an existing level.",
-    "parameters": {
-      "properties": {
-        "max_x": {
-          "type": "number",
-          "description": "Optional new maximum X boundary in feet."
-        },
-        "reference_level_id": {
-          "type": "string",
-          "description": "Optional UniqueId of an existing level to copy extents from."
-        },
-        "level_id": {
-          "type": "string",
-          "description": "The UniqueId of the target level."
-        },
-        "min_y": {
-          "type": "number",
-          "description": "Optional new minimum Y boundary in feet."
-        },
-        "min_x": {
-          "type": "number",
-          "description": "Optional new minimum X boundary in feet."
-        },
-        "maximize_extents": {
-          "type": "boolean",
-          "description": "Optional option to maximize 3D extents."
-        },
-        "max_y": {
-          "type": "number",
-          "description": "Optional new maximum Y boundary in feet."
-        },
-        "name": {
-          "type": "string",
-          "description": "Optional new name for the level."
-        },
-        "elevation": {
-          "type": "number",
-          "description": "Optional new elevation height in feet."
-        }
-      },
-      "type": "object",
-      "required": [
-        "level_id"
-      ]
-    }
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "element": "level",
+    "custom_instructions": "Returns precise visual coordinates and elevations. Useful for checking horizontal reference limits before grid placement."
   },
   {
     "name": "delete_level",
@@ -163,55 +137,97 @@
           "description": "The UniqueId of the target level."
         }
       },
-      "type": "object",
       "required": [
         "level_id"
-      ]
-    }
+      ],
+      "type": "object"
+    },
+    "element": "level",
+    "custom_instructions": "Revit requires at least one level to exist in the document at all times. Attempting to delete the last level will trigger an exception."
   },
   {
-    "name": "fetch_levels",
-    "description": "Fetches all levels in the project, including their absolute 3D model boundary extents.",
-    "parameters": {
-      "properties": {},
-      "type": "object",
-      "required": []
-    }
-  },
-  {
-    "name": "modify_grid",
-    "description": "Modifies coordinates or renames an existing gridline.",
+    "name": "create_grid",
+    "description": "Creates a new linear gridline in the project.",
     "parameters": {
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Optional new name for the grid."
+        "end_x": {
+          "type": "number",
+          "description": "End X coordinate in feet."
         },
         "start_x": {
           "type": "number",
-          "description": "Optional new start X (feet)."
+          "description": "Start X coordinate in feet."
         },
-        "start_y": {
-          "type": "number",
-          "description": "Optional new start Y (feet)."
+        "name": {
+          "type": "string",
+          "description": "Unique grid label (e.g., 'A', '1')."
         },
         "end_y": {
           "type": "number",
-          "description": "Optional new end Y (feet)."
+          "description": "End Y coordinate in feet."
         },
-        "grid_id": {
-          "type": "string",
-          "description": "The UniqueId of the grid to edit."
-        },
-        "end_x": {
+        "start_y": {
           "type": "number",
-          "description": "Optional new end X (feet)."
+          "description": "Start Y coordinate in feet."
         }
       },
-      "type": "object",
       "required": [
-        "grid_id"
-      ]
-    }
+        "name",
+        "start_x",
+        "start_y",
+        "end_x",
+        "end_y"
+      ],
+      "type": "object"
+    },
+    "element": "grid",
+    "custom_instructions": "Grid names must be unique. The coordinates should align with the project envelope / level boundaries."
+  },
+  {
+    "name": "create_level",
+    "description": "Creates a new horizontal datum level with options to configure custom visual extents.",
+    "parameters": {
+      "properties": {
+        "min_x": {
+          "type": "number",
+          "description": "Optional minimum X visual boundary in feet."
+        },
+        "max_x": {
+          "type": "number",
+          "description": "Optional maximum X visual boundary in feet."
+        },
+        "maximize_extents": {
+          "type": "boolean",
+          "description": "Option to maximize the default 3D extents. Defaults to True."
+        },
+        "min_y": {
+          "type": "number",
+          "description": "Optional minimum Y visual boundary in feet."
+        },
+        "max_y": {
+          "type": "number",
+          "description": "Optional maximum Y visual boundary in feet."
+        },
+        "elevation": {
+          "type": "number",
+          "description": "Elevation height in feet."
+        },
+        "reference_level_id": {
+          "type": "string",
+          "description": "Optional UniqueId of an existing level to copy extents from across views."
+        },
+        "name": {
+          "type": "string",
+          "description": "Unique name of the level (e.g., 'Level 3')."
+        }
+      },
+      "required": [
+        "name",
+        "elevation"
+      ],
+      "type": "object"
+    },
+    "element": "level",
+    "custom_instructions": "Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations."
   }
 ]
