@@ -305,8 +305,10 @@ ai_revit_agent/
 │                   ├── tools/               # Modular Python tool definitions
 │                   │   ├── __init__.py      # Tool registry, hot-reloading & routing entrypoint
 │                   │   ├── grid_tools.py    # Grid query/modify transaction operations
-│                   │   └── level_tools.py   # Level elevation/boundary projection operations
+│                   │   ├── level_tools.py   # Level elevation/boundary projection operations
+│                   │   └── column_tools.py  # Structural column/type management database operations
 │                   └── RevitAgentBridge.dll # Built C# bridge assembly
+├── .cursorrules                         # AI Agent workspace context rules
 ├── run.bat                         # Windows automated startup launcher
 └── .gitignore                      # Git exclusion rules
 ```
@@ -441,6 +443,14 @@ Reversing this order will trigger Revit exceptions.
 
 ---
 
+### Structural Column & Type Validation Rules
+
+* **Auto-Pin/Unpin:** Newly created structural columns are pinned automatically. Deletion unpins them first.
+* **Strict Type Checks:** If a column instance creation or modification requests a specific type ID that is not loaded, the bridge explicitly returns a `"not found"` error instead of falling back to defaults or ignoring it.
+* **Detailed Parameter Feedback:** Type duplication and parameter editing (`duplicate_structural_column_type` and `modify_structural_column_type`) safely check .NET parameter StorageTypes (Double, Integer, String, ElementId) and return list logs indicating which parameters were successfully updated and which ones were not found or failed to write.
+
+---
+
 ## 8. Configuration & Environment Variables
 
 The backend is configured via `backend/.env`. Key parameters:
@@ -458,6 +468,30 @@ The backend is configured via `backend/.env`. Key parameters:
 ---
 
 ## 9. Developer's Guide (How to Add Custom Tools)
+
+### Critical IronPython Constraints & Gotchas
+
+#### 1. Python 3 compatibility limitations
+pyRevit runs on **IronPython 2.7**. This means modern Python 3 syntax will throw compilation errors:
+* **Do NOT use f-strings** (e.g., `f"{variable}"`). Use standard formatting: `"... {}".format(variable)`.
+* Do NOT use type hinting in function signatures (e.g., `def my_func(doc: Document)`).
+* Use the `.Key` property instead of `.keys()` when extracting dictionary keys.
+
+#### 2. Category & Enum Comparisons
+In IronPython, .NET Enums do not automatically equate to standard Python integers.
+* When checking an element category or comparing enums, **always cast the enum to an integer** using `int()` to prevent comparison mismatches:
+  ```python
+  # CORRECT
+  if element.Category.Id.IntegerValue != int(BuiltInCategory.OST_StructuralColumns):
+  
+  # INCORRECT (Will evaluate to True in Python 2.7)
+  if element.Category.Id.IntegerValue != BuiltInCategory.OST_StructuralColumns:
+  ```
+
+#### 3. Garbage Collection & Namespace Isolation
+When a pyRevit script finishes execution, IronPython cleans up its module-level global variables. Because the C# bridge maintains references to the registered functions in memory, **all dependencies and imports must be kept self-contained within the tool functions themselves**. Import Revit namespaces inside the tool functions rather than at the top of the file to prevent missing module references.
+
+---
 
 ### Modular Registry & Submodules
 

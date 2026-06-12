@@ -63,6 +63,8 @@ class ToolRegistry(object):
                     reload(sys.modules['tools.level_tools'])
                 if 'tools.grid_tools' in sys.modules:
                     reload(sys.modules['tools.grid_tools'])
+                if 'tools.column_tools' in sys.modules:
+                    reload(sys.modules['tools.column_tools'])
             except Exception:
                 pass
                 
@@ -87,7 +89,7 @@ registry = ToolRegistry()
 @registry.register(
     name="fetch_levels",
     description="Fetches all levels in the project, including their absolute 3D model boundary extents.",
-    custom_instructions="Returns precise visual coordinates and elevations. Useful for checking horizontal reference limits before grid placement.",
+    custom_instructions="Returns precise visual coordinates and elevations. If different levels have different boundary extents in the model, you MUST ask the user which level's extents the grids should fit before creating or modifying grids.",
     parameters={
         "type": "object",
         "properties": {},
@@ -117,7 +119,7 @@ def fetch_grids(doc, ui_app, tool_input):
 @registry.register(
     name="create_grid",
     description="Creates a new linear gridline in the project.",
-    custom_instructions="Grid names must be unique. The coordinates should align with the project envelope / level boundaries.",
+    custom_instructions="Grid names must be unique. The coordinates should align with the project envelope / level boundaries. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
     parameters={
         "type": "object",
         "properties": {
@@ -145,7 +147,7 @@ def create_grid(doc, ui_app, tool_input):
 @registry.register(
     name="modify_grid",
     description="Modifies coordinates or renames an existing gridline.",
-    custom_instructions="Grid curves will only be modified if all start/end coordinates are provided. Otherwise, only rename applies.",
+    custom_instructions="Grid curves will only be modified if all start/end coordinates are provided. Otherwise, only rename applies. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
     parameters={
         "type": "object",
         "properties": {
@@ -166,12 +168,25 @@ def modify_grid(doc, ui_app, tool_input):
     grid_id = tool_input["grid_id"]
     name = tool_input.get("name")
     
+    coord_keys = ["start_x", "start_y", "end_x", "end_y"]
+    has_any_coords = any(k in tool_input for k in coord_keys)
+    
     start_pt = None
     end_pt = None
-    has_coords = all(k in tool_input for k in ["start_x", "start_y", "end_x", "end_y"])
-    if has_coords:
-        start_pt = XYZ(float(tool_input["start_x"]), float(tool_input["start_y"]), 0.0)
-        end_pt = XYZ(float(tool_input["end_x"]), float(tool_input["end_y"]), 0.0)
+    
+    if has_any_coords:
+        grid = doc.GetElement(grid_id)
+        if grid and grid.Curve and grid.Curve.IsBound:
+            curr_start = grid.Curve.GetEndPoint(0)
+            curr_end = grid.Curve.GetEndPoint(1)
+            
+            x0 = float(tool_input["start_x"]) if "start_x" in tool_input else curr_start.X
+            y0 = float(tool_input["start_y"]) if "start_y" in tool_input else curr_start.Y
+            x1 = float(tool_input["end_x"]) if "end_x" in tool_input else curr_end.X
+            y1 = float(tool_input["end_y"]) if "end_y" in tool_input else curr_end.Y
+            
+            start_pt = XYZ(x0, y0, 0.0)
+            end_pt = XYZ(x1, y1, 0.0)
         
     view = ui_app.ActiveUIDocument.ActiveView
     return GridTools(doc).modify(grid_id, name=name, start_pt=start_pt, end_pt=end_pt, view=view)
@@ -198,7 +213,7 @@ def delete_grid(doc, ui_app, tool_input):
 @registry.register(
     name="create_level",
     description="Creates a new horizontal datum level with options to configure custom visual extents.",
-    custom_instructions="Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations.",
+    custom_instructions="Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
     parameters={
         "type": "object",
         "properties": {
@@ -293,7 +308,7 @@ def modify_level(doc, ui_app, tool_input):
 @registry.register(
     name="delete_level",
     description="Deletes an existing level. Deletes all associated plan views automatically.",
-    custom_instructions="Revit requires at least one level to exist in the document at all times. Attempting to delete the last level will trigger an exception.",
+    custom_instructions="Revit requires at least one level to exist in the document at all times. Attempting to delete the last level will trigger an exception. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
     parameters={
         "type": "object",
         "properties": {
@@ -305,4 +320,209 @@ def modify_level(doc, ui_app, tool_input):
 def delete_level(doc, ui_app, tool_input):
     from tools.level_tools import LevelTools
     level_id = tool_input["level_id"]
-    return LevelTools(doc).delete(level_id)
+    return LevelTools(doc).delete(level_id, ui_app)
+
+
+@registry.register(
+    name="fetch_structural_columns",
+    description="Fetches all structural columns in the project, including their location coordinates, base/top levels, base/top offsets, rotation, and type information.",
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+)
+def fetch_structural_columns(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    return ColumnTools(doc).fetch_all()
+
+
+@registry.register(
+    name="fetch_structural_column_types",
+    description="Fetches all loaded structural column family types, including their names and unique type IDs.",
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+)
+def fetch_structural_column_types(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    return ColumnTools(doc).fetch_types()
+
+
+@registry.register(
+    name="create_structural_column",
+    description="Creates a new vertical structural column at specific 2D coordinates.",
+    custom_instructions="To place structural columns at grid intersections (a standard AEC practice), first call 'fetch_grids' to query grid coordinates, calculate the intersection point in feet, and pass it to this tool.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "x": {"type": "number", "description": "X coordinate in feet."},
+            "y": {"type": "number", "description": "Y coordinate in feet."},
+            "base_level_id": {"type": "string", "description": "UniqueId or Name of the base level."},
+            "top_level_id": {"type": "string", "description": "Optional UniqueId or Name of the top level."},
+            "base_offset": {"type": "number", "description": "Optional base level offset in feet. Defaults to 0.0."},
+            "top_offset": {"type": "number", "description": "Optional top level offset in feet. Defaults to 0.0."},
+            "rotation_degrees": {"type": "number", "description": "Optional rotation angle in degrees around Z axis. Defaults to 0.0."},
+            "column_type_id": {"type": "string", "description": "Optional UniqueId or name of structural column family symbol. Omit to use default."}
+        },
+        "required": ["x", "y", "base_level_id"]
+    }
+)
+def create_structural_column(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    
+    x = float(tool_input["x"])
+    y = float(tool_input["y"])
+    base_level_id = str(tool_input["base_level_id"])
+    top_level_id = tool_input.get("top_level_id")
+    base_offset = tool_input.get("base_offset", 0.0)
+    top_offset = tool_input.get("top_offset", 0.0)
+    rotation_degrees = tool_input.get("rotation_degrees", 0.0)
+    column_type_id = tool_input.get("column_type_id")
+    
+    return ColumnTools(doc).create(
+        x=x,
+        y=y,
+        base_level_id=base_level_id,
+        top_level_id=top_level_id,
+        base_offset=base_offset,
+        top_offset=top_offset,
+        rotation_degrees=rotation_degrees,
+        column_type_id=column_type_id
+    )
+
+
+@registry.register(
+    name="modify_structural_column",
+    description="Modifies attributes (location, levels, offsets, rotation, type) of an existing structural column instance.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "column_id": {"type": "string", "description": "UniqueId of the target structural column instance."},
+            "x": {"type": "number", "description": "Optional new X coordinate in feet."},
+            "y": {"type": "number", "description": "Optional new Y coordinate in feet."},
+            "base_level_id": {"type": "string", "description": "Optional UniqueId or Name of new base level."},
+            "top_level_id": {"type": "string", "description": "Optional UniqueId or Name of new top level."},
+            "base_offset": {"type": "number", "description": "Optional new base offset in feet."},
+            "top_offset": {"type": "number", "description": "Optional new top offset in feet."},
+            "rotation_degrees": {"type": "number", "description": "Optional new absolute rotation in degrees around Z axis."},
+            "column_type_id": {"type": "string", "description": "Optional new structural column type UniqueId or name."}
+        },
+        "required": ["column_id"]
+    }
+)
+def modify_structural_column(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    
+    column_id = tool_input["column_id"]
+    x = tool_input.get("x")
+    y = tool_input.get("y")
+    base_level_id = tool_input.get("base_level_id")
+    top_level_id = tool_input.get("top_level_id")
+    base_offset = tool_input.get("base_offset")
+    top_offset = tool_input.get("top_offset")
+    rotation_degrees = tool_input.get("rotation_degrees")
+    column_type_id = tool_input.get("column_type_id")
+    
+    def to_float(val):
+        return float(val) if val is not None else None
+        
+    return ColumnTools(doc).modify(
+        column_id=column_id,
+        x=to_float(x),
+        y=to_float(y),
+        base_level_id=base_level_id,
+        top_level_id=top_level_id,
+        base_offset=to_float(base_offset),
+        top_offset=to_float(top_offset),
+        rotation_degrees=to_float(rotation_degrees),
+        column_type_id=column_type_id
+    )
+
+
+@registry.register(
+    name="delete_structural_column",
+    description="Deletes an existing structural column instance.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "column_id": {"type": "string", "description": "UniqueId of the structural column to delete."}
+        },
+        "required": ["column_id"]
+    }
+)
+def delete_structural_column(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    column_id = tool_input["column_id"]
+    return ColumnTools(doc).delete(column_id)
+
+
+@registry.register(
+    name="duplicate_structural_column_type",
+    description="Duplicates an existing structural column type and modifies its dimensions (type parameters).",
+    parameters={
+        "type": "object",
+        "properties": {
+            "column_type_id": {"type": "string", "description": "UniqueId or Name of the source type to duplicate."},
+            "new_type_name": {"type": "string", "description": "Name for the duplicated type."},
+            "dimensions": {
+                "type": "object",
+                "description": "Optional dictionary of type parameter names mapping to float values in feet.",
+                "additionalProperties": {"type": "number"}
+            }
+        },
+        "required": ["column_type_id", "new_type_name"]
+    }
+)
+def duplicate_structural_column_type(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    
+    column_type_id = tool_input["column_type_id"]
+    new_type_name = tool_input["new_type_name"]
+    dimensions = tool_input.get("dimensions")
+    
+    return ColumnTools(doc).duplicate_type(column_type_id, new_type_name, dimensions)
+
+
+@registry.register(
+    name="modify_structural_column_type",
+    description="Modifies the type parameters (dimensions) of an existing structural column family type.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "column_type_id": {"type": "string", "description": "UniqueId or Name of structural column type to edit."},
+            "dimensions": {
+                "type": "object",
+                "description": "Dictionary of type parameter names mapping to float values in feet.",
+                "additionalProperties": {"type": "number"}
+            }
+        },
+        "required": ["column_type_id", "dimensions"]
+    }
+)
+def modify_structural_column_type(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    
+    column_type_id = tool_input["column_type_id"]
+    dimensions = tool_input["dimensions"]
+    
+    return ColumnTools(doc).modify_type(column_type_id, dimensions)
+
+
+@registry.register(
+    name="delete_structural_column_type",
+    description="Deletes a structural column type from the project document.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "column_type_id": {"type": "string", "description": "UniqueId of target structural column type to delete."}
+        },
+        "required": ["column_type_id"]
+    }
+)
+def delete_structural_column_type(doc, ui_app, tool_input):
+    from tools.column_tools import ColumnTools
+    column_type_id = tool_input["column_type_id"]
+    return ColumnTools(doc).delete_type(column_type_id)

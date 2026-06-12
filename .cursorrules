@@ -1,0 +1,75 @@
+# Autodesk Revit AI Agent: AI Coding Context & Guidelines
+
+This document provides system context, architectural constraints, and coding rules for AI agents developing or modifying the **Autodesk Revit AI Agent** codebase.
+
+---
+
+## 1. System Architecture & Threading Model
+
+The platform connects a web-based chat interface (Google Gemini) to a desktop Building Information Modeling (BIM) program (Autodesk Revit 2025).
+
+### The Revit UI Thread Constraint
+Autodesk Revit is single-threaded and enforces a strict rule: **all API calls modifying or reading the document must execute on Revit's main UI thread**. Calls from network threads throw exceptions or crash Revit.
+To solve this, the application uses a **four-layer marshaled execution loop**:
+1. **React Frontend**: Subscribes to Server-Sent Events (SSE) from the FastAPI backend to display streaming responses, thoughts, and tool execution cards.
+2. **FastAPI Backend (Python 3.11 + aiosqlite)**: Runs the provider-agnostic agent loop, manages chat history, and routes tool requests to the C# Bridge.
+3. **C# Bridge Server (loaded inside Revit)**: Spawns an embedded `HttpListener` on a background thread on port `8080`. Incoming requests are queued as `AgentTask` objects, and the listening thread blocks using an `AutoResetEvent`. The C# Bridge calls `ExternalEvent.Raise()` to signal Revit.
+4. **pyRevit Extension (IronPython 2.7)**: Runs the Python tool dispatcher on Revit's main UI thread. It executes the tool logic, runs transactions, writes results, and sets the C# task completion event.
+
+```
+React Frontend (SSE) <---> FastAPI Backend <---> C# Bridge (HttpListener) <---> Revit UI Thread (pyRevit Executor)
+```
+
+---
+
+## 2. Directory & File Structure Map
+
+* `/backend` - FastAPI Backend
+  * `/api` - Chat stream (`chat.py`), settings, and provider configs.
+  * `/core` - Decoupled provider-agnostic agent loop (`agent_loop.py`).
+  * `/infra` - SQLite client (`db.py`) using `aiosqlite` with raw SQL.
+  * `/providers` - Adapters for AI clients (e.g. Gemini GenAI SDK).
+  * `/services` - HTTP clients interfacing with the C# Bridge (`revit_bridge.py`), tool registration (`tool_registry.py`), and SSE formatting (`streaming.py`).
+* `/bridge-source` - .NET 8.0 C# Bridge project (`BridgeServer.cs`).
+* `/extension` - pyRevit extension ribbon definitions, startup boostrappers (`script.py`), and modular tool packages (`tools/` containing `level_tools.py`, `grid_tools.py`, `column_tools.py`).
+* `/frontend` - Vite + React + TypeScript web app.
+
+---
+
+## 3. Critical Coding Constraints (MUST FOLLOW)
+
+### 3.1 IronPython 2.7 / pyRevit Constraints
+The code running inside Revit executes in an **IronPython 2.7** environment.
+* **NO Python 3 Syntax:** Do NOT use f-strings (use `"... {}".format(var)`). Do NOT use type hints in function signatures (e.g., `def func(doc: Document)`). Use `.Key` instead of `.keys()` for dictionaries.
+* **Self-Contained Imports:** Import all Revit and external modules *inside* the tool functions. Avoid global imports at the top of the submodule files. When the pyRevit execution scope terminates, module-level global variables are garbage collected. Because the C# bridge maintains callbacks to these functions, top-level imports will fail with `NameError` or reference exceptions in subsequent calls.
+
+### 3.2 Category & Enum Comparisons in IronPython
+In IronPython, .NET Enums do not automatically equate to standard Python integers.
+* When checking an element category or other enums, **always cast the enum to an integer** to prevent type comparison mismatches:
+  ```python
+  # CORRECT
+  if element.Category.Id.IntegerValue != int(BuiltInCategory.OST_StructuralColumns):
+  
+  # INCORRECT (Will evaluate to True in Python 2.7)
+  if element.Category.Id.IntegerValue != BuiltInCategory.OST_StructuralColumns:
+  ```
+
+### 3.3 Database Operations
+* **No ORM (SQLAlchemy/SQLModel):** All database operations must write and execute raw SQL statements using `aiosqlite` inside [db.py](file:///d:/Construction/Projects/ai_revit_agent/backend/infra/db.py). This separates API models from database schemas and avoids Late-Binding ORM bugs.
+
+---
+
+## 4. Development Workflow & Tool Creation
+
+To add a new tool (e.g., drawing detail curves or placing windows):
+1. Implement the tool logic inside a submodule under `extension/.../StartBridge.pushbutton/tools/`.
+2. Register the tool function in `tools/__init__.py` using `@registry.register` decorator and supply description and parameters.
+3. Add the module to the hot-reloading block inside `ToolRegistry.execute()` so edits are picked up instantly without restarting the pyRevit pushbutton server in Revit.
+4. Click **Refresh Tools** in the web interface settings panel or restart FastAPI to synchronize schemas.
+
+---
+
+## 5. Revit Modeling Operations Rules
+
+* **Auto-Pin/Unpin:** Newly created datums (Levels and Grids) must be pinned (`Pinned = True`) immediately after transaction commits. Deletion tools must unpin them (`Pinned = False`) before calling `doc.Delete()`.
+* **Revit Minimum Level Rule:** Revit requires at least one level to exist in the document at all times. When replacing or rebuilding levels, **CREATE** new levels first, call `fetch_levels` to obtain their parameters, and **DELETE** old levels last.

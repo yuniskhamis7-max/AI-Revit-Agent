@@ -15,29 +15,34 @@ class LevelTools(object):
     @staticmethod
     def clip_line_to_bbox_2d(p_x, p_y, d_x, d_y, min_x, min_y, max_x, max_y):
         """Clips a 2D line defined by point P and direction D inside a 2D bounding box."""
+        # Parallel to Y-axis: horizontal axis in this view is Y. Only clip Y.
+        if abs(d_x) < 1e-9:
+            if abs(d_y) < 1e-9:
+                return None
+            t1 = (min_y - p_y) / d_y
+            t2 = (max_y - p_y) / d_y
+            return min(t1, t2), max(t1, t2)
+            
+        # Parallel to X-axis: horizontal axis in this view is X. Only clip X.
+        if abs(d_y) < 1e-9:
+            t1 = (min_x - p_x) / d_x
+            t2 = (max_x - p_x) / d_x
+            return min(t1, t2), max(t1, t2)
+            
+        # Diagonal view: standard 2D clipping against both boundaries
         t_min = float('-inf')
         t_max = float('inf')
         
-        # Clip against X boundaries
-        if abs(d_x) < 1e-9:
-            if p_x < min_x or p_x > max_x:
-                return None
-        else:
-            t1 = (min_x - p_x) / d_x
-            t2 = (max_x - p_x) / d_x
-            t_min = max(t_min, min(t1, t2))
-            t_max = min(t_max, max(t1, t2))
-            
-        # Clip against Y boundaries
-        if abs(d_y) < 1e-9:
-            if p_y < min_y or p_y > max_y:
-                return None
-        else:
-            t1 = (min_y - p_y) / d_y
-            t2 = (max_y - p_y) / d_y
-            t_min = max(t_min, min(t1, t2))
-            t_max = min(t_max, max(t1, t2))
-            
+        t1 = (min_x - p_x) / d_x
+        t2 = (max_x - p_x) / d_x
+        t_min = max(t_min, min(t1, t2))
+        t_max = min(t_max, max(t1, t2))
+        
+        t1 = (min_y - p_y) / d_y
+        t2 = (max_y - p_y) / d_y
+        t_min = max(t_min, min(t1, t2))
+        t_max = min(t_max, max(t1, t2))
+        
         if t_min > t_max:
             return None
             
@@ -286,8 +291,9 @@ class LevelTools(object):
 
                 if reference_level_id:
                     ref_level = self.doc.GetElement(reference_level_id)
-                    if ref_level and isinstance(ref_level, Level):
-                        self.copy_level_extents(self.doc, ref_level, new_level)
+                    if not ref_level or not isinstance(ref_level, Level):
+                        return {"status": "error", "message": "Reference level '{}' not found.".format(reference_level_id)}
+                    self.copy_level_extents(self.doc, ref_level, new_level)
                 else:
                     if all(v is not None for v in [min_x, min_y, max_x, max_y]):
                         self.apply_level_extents_to_views(self.doc, new_level, min_x, min_y, max_x, max_y)
@@ -320,7 +326,7 @@ class LevelTools(object):
         Returns:
             dict: Structured success/error response.
         """
-        from Autodesk.Revit.DB import Transaction, Level
+        from Autodesk.Revit.DB import Transaction, Level, FilteredElementCollector
         from collections import OrderedDict
 
         level = self.doc.GetElement(level_id)
@@ -337,6 +343,9 @@ class LevelTools(object):
                     level.Elevation = float(elevation)
 
                 if name and name != level.Name:
+                    for lvl in FilteredElementCollector(self.doc).OfClass(Level):
+                        if lvl.Id != level.Id and lvl.Name.lower() == name.lower():
+                            return {"status": "error", "message": "Level name '{}' already exists.".format(name)}
                     level.Name = str(name)
 
                 if maximize_extents:
@@ -344,8 +353,9 @@ class LevelTools(object):
 
                 if reference_level_id:
                     ref_level = self.doc.GetElement(reference_level_id)
-                    if ref_level and isinstance(ref_level, Level):
-                        self.copy_level_extents(self.doc, ref_level, level)
+                    if not ref_level or not isinstance(ref_level, Level):
+                        return {"status": "error", "message": "Reference level '{}' not found.".format(reference_level_id)}
+                    self.copy_level_extents(self.doc, ref_level, level)
                 else:
                     coords = [min_x, min_y, max_x, max_y]
                     if any(v is not None for v in coords):
@@ -373,21 +383,71 @@ class LevelTools(object):
                 trans.RollBack()
                 return {"status": "error", "message": "Failed to modify level: " + str(ex)}
 
-    def delete(self, level_id):
+    def delete(self, level_id, ui_app=None):
         """Deletes an existing level from the document.
         
         Args:
             level_id (str): UniqueId of the target Level.
+            ui_app (Autodesk.Revit.UI.UIApplication, optional): The Revit UIApplication context.
             
         Returns:
             dict: Structured success/error response.
         """
-        from Autodesk.Revit.DB import Transaction, Level
+        from Autodesk.Revit.DB import Transaction, Level, FilteredElementCollector, View, ViewType
         from collections import OrderedDict
 
         level = self.doc.GetElement(level_id)
         if not level or not isinstance(level, Level):
             return {"status": "error", "message": "Level element not found."}
+
+        uidoc = ui_app.ActiveUIDocument if ui_app else None
+        active_view = uidoc.ActiveView if uidoc else None
+
+        if uidoc and active_view:
+            active_view_deleted = False
+            try:
+                if active_view.GenLevel and active_view.GenLevel.Id == level.Id:
+                    active_view_deleted = True
+            except Exception:
+                pass
+
+            if active_view_deleted:
+                # Find a safe view to switch to (must not be associated with the level being deleted)
+                allowed_types = [
+                    ViewType.FloorPlan,
+                    ViewType.CeilingPlan,
+                    ViewType.ThreeD,
+                    ViewType.Elevation,
+                    ViewType.Section,
+                    ViewType.DraftingView
+                ]
+                
+                safe_view = None
+                for v in FilteredElementCollector(self.doc).OfClass(View):
+                    if v.IsTemplate:
+                        continue
+                    
+                    is_assoc = False
+                    try:
+                        if v.GenLevel and v.GenLevel.Id == level.Id:
+                            is_assoc = True
+                    except Exception:
+                        pass
+                    
+                    if is_assoc:
+                        continue
+                        
+                    if v.ViewType in allowed_types:
+                        safe_view = v
+                        break
+                
+                if safe_view:
+                    try:
+                        uidoc.ActiveView = safe_view
+                    except Exception as ex:
+                        return {"status": "error", "message": "Cannot delete level because it is associated with the active view, and switching views failed: " + str(ex)}
+                else:
+                    return {"status": "error", "message": "Cannot delete level because it is associated with the active view, and no other safe view was found to switch to."}
 
         with Transaction(self.doc, "Agent - Delete Level") as trans:
             trans.Start()

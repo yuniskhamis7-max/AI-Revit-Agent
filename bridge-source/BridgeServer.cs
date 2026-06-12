@@ -186,6 +186,7 @@ namespace RevitAgentBridge
             _listener = new HttpListener();
             _listener.Prefixes.Add($"http://127.0.0.1:{port}/execute/");
             _listener.Prefixes.Add($"http://127.0.0.1:{port}/tools/");
+            _listener.Prefixes.Add($"http://127.0.0.1:{port}/health/");
             _listener.Start();
             _isRunning = true;
 
@@ -241,7 +242,11 @@ namespace RevitAgentBridge
                     HttpListenerRequest request = context.Request;
                     string path = request.Url.AbsolutePath.TrimEnd('/').ToLowerInvariant();
 
-                    if (path == "/tools")
+                    if (path == "/health")
+                    {
+                        WriteJsonResponse(context, "{\"status\":\"success\",\"message\":\"Bridge server is responsive.\"}");
+                    }
+                    else if (path == "/tools")
                     {
                         // GET /tools/ — inject a get_tools request into the Python router
                         // so the daemon can auto-discover all registered tool schemas.

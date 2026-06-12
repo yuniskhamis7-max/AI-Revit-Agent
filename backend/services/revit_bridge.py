@@ -32,6 +32,7 @@ class RevitBridgeClient:
         self.client: httpx.AsyncClient | None = None
         self.discovery_url = f"{self.host}:{self.port}/tools/"
         self.execute_url = f"{self.host}:{self.port}/execute/"
+        self.health_url = f"{self.host}:{self.port}/health/"
 
     async def start(self) -> None:
         """Initialize the shared HTTP client session."""
@@ -63,7 +64,7 @@ class RevitBridgeClient:
         """
         try:
             client = self._get_client()
-            response = await client.get(self.discovery_url, timeout=3.0)
+            response = await client.get(self.health_url, timeout=3.0)
             return response.status_code == 200
         except Exception:
             return False
