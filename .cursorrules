@@ -70,6 +70,18 @@ To add a new tool (e.g., drawing detail curves or placing windows):
 ---
 
 ## 5. Revit Modeling Operations Rules
-
+ 
 * **Auto-Pin/Unpin:** Newly created datums (Levels and Grids) must be pinned (`Pinned = True`) immediately after transaction commits. Deletion tools must unpin them (`Pinned = False`) before calling `doc.Delete()`.
 * **Revit Minimum Level Rule:** Revit requires at least one level to exist in the document at all times. When replacing or rebuilding levels, **CREATE** new levels first, call `fetch_levels` to obtain their parameters, and **DELETE** old levels last.
+
+---
+
+## 6. Testing & Verifying Tools
+
+* **Mandatory CLI Tool Runner**: When modifying, adding, or testing Revit tools, you **MUST** use the [run_tool.py](file:///d:/Construction/Projects/ai_revit_agent/run_tool.py) command-line utility located in the repository root.
+* **DO NOT** create custom test scripts or prompt the user for manual verification inside the Revit UI.
+* **Basic command patterns**:
+  - Check bridge tools: `python run_tool.py list`
+  - Run tool execution: `python run_tool.py run <tool_name> [args...]`
+  - Chain commands: `python run_tool.py run <tool1> --then <tool2>`
+  - File-based batch: `python run_tool.py batch <file_path>`

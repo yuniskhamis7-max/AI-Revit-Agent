@@ -1,5 +1,12 @@
 # Autodesk Revit AI Agent: Developer & User Manual
 
+> [!IMPORTANT]
+> 🤖 **FOR AI CODING AGENTS (Auto-Discovery & Testing Guidelines)**:
+> If you are an AI coding assistant (e.g., Cursor, Copilot, Antigravity, etc.) developing or testing tools on this codebase:
+> - **DO NOT** write custom, one-off test scripts to simulate HTTP POST payloads to the Revit bridge.
+> - **DO NOT** manually ask the user to click buttons or execute commands inside the Revit UI for basic backend testing.
+> - **ALWAYS** use the dedicated CLI utility [run_tool.py](file:///d:/Construction/Projects/ai_revit_agent/run_tool.py) located in the project root to inspect, execute, chain, and batch-test all Revit bridge tools. It is the authoritative, standardized verification tool for this repository.
+
 [![Revit Version](https://img.shields.io/badge/Revit-2025-blue.svg)](https://www.autodesk.com/products/revit/overview)
 [![Python Version](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/windows)
@@ -557,6 +564,34 @@ Add your module to the hot-reloading block inside the `execute` method of `ToolR
 
 #### 4. Discovery:
 The FastAPI backend will automatically discover the new tool schema on its next startup or when you click **Refresh Tools** in the web settings panel. Because of hot-reloading, you do not need to toggle or restart the pyRevit bridge button inside Revit to test python code edits.
+
+#### 5. Command-Line Testing & Verification via `run_tool.py`:
+To test your newly added tool or verify existing tools, run the [run_tool.py](file:///d:/Construction/Projects/ai_revit_agent/run_tool.py) utility in the project root. It connects directly to the Revit Bridge HTTP port (`8080`) and bypasses the main chat UI for fast, headless validation.
+
+* **List discovered schemas**:
+  ```bash
+  python run_tool.py list
+  ```
+* **Show details for a tool**:
+  ```bash
+  python run_tool.py show <tool_name>
+  ```
+* **Run a single tool**:
+  ```bash
+  python run_tool.py run create_grid name="Grid A" start_x=0.0 start_y=0.0 end_x=10.0 end_y=10.0
+  ```
+  *(Note: Values are automatically cast to their proper types: floats, integers, booleans, or parsed JSON).*
+* **Run chained tools sequentially**:
+  Use the `--then` separator to combine multiple commands:
+  ```bash
+  python run_tool.py run fetch_levels --then create_grid name="Grid A" start_x=0.0 start_y=0.0 end_x=10.0 end_y=10.0 --then fetch_grids
+  ```
+* **Run batch commands from a file**:
+  ```bash
+  python run_tool.py batch commands.txt
+  # or using JSON format
+  python run_tool.py batch commands.json
+  ```
 
 ---
 
