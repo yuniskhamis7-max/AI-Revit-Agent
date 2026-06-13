@@ -12,7 +12,7 @@ class ToolRegistry(object):
     def __init__(self):
         self._tools = {}
 
-    def register(self, name, description, custom_instructions=None, parameters=None):
+    def register(self, name, description, custom_instructions=None, parameters=None, measurement_unit="feet", rotation_unit=None):
         """Decorator to register a function as an agent-callable tool."""
         def decorator(func):
             schema = OrderedDict()
@@ -20,6 +20,10 @@ class ToolRegistry(object):
             schema["description"] = description
             if custom_instructions:
                 schema["custom_instructions"] = custom_instructions
+            if measurement_unit:
+                schema["measurement_unit"] = measurement_unit
+            if rotation_unit:
+                schema["rotation_unit"] = rotation_unit
             schema["parameters"] = parameters or {}
 
             self._tools[name] = {
@@ -42,6 +46,16 @@ class ToolRegistry(object):
             tool_input = payload.get("input") or {}
 
             if tool_name == "get_tools":
+                try:
+                    import sys
+                    self._tools.clear()
+                    if 'tools' in sys.modules:
+                        reload(sys.modules['tools'])
+                        new_registry = sys.modules['tools'].registry
+                        self._tools.update(new_registry._tools)
+                except Exception:
+                    pass
+
                 discovery_res = OrderedDict([
                     ("status", "success"),
                     ("tools", self.get_schemas())
@@ -88,8 +102,9 @@ registry = ToolRegistry()
 
 @registry.register(
     name="fetch_levels",
-    description="Fetches all levels in the project, including their absolute 3D model boundary extents.",
+    description="Fetches all levels in the project, including their absolute 3D model boundary extents. All elevations and coordinates are returned in feet.",
     custom_instructions="Returns precise visual coordinates and elevations. If different levels have different boundary extents in the model, you MUST ask the user which level's extents the grids should fit before creating or modifying grids.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {},
@@ -103,8 +118,9 @@ def fetch_levels(doc, ui_app, tool_input):
 
 @registry.register(
     name="fetch_grids",
-    description="Fetches all gridlines in the project, including their unique IDs, labels, endpoints, and curvature details.",
+    description="Fetches all gridlines in the project, including their unique IDs, labels, endpoints, and curvature details. All coordinates and arc radii are returned in feet.",
     custom_instructions="Query this to understand the existing grid layout, spacing pattern, and naming convention before editing.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {},
@@ -118,8 +134,9 @@ def fetch_grids(doc, ui_app, tool_input):
 
 @registry.register(
     name="create_grid",
-    description="Creates a new linear gridline in the project.",
+    description="Creates a new linear gridline in the project. The start and end coordinates must be specified in feet.",
     custom_instructions="Grid names must be unique. The coordinates should align with the project envelope / level boundaries. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -146,17 +163,18 @@ def create_grid(doc, ui_app, tool_input):
 
 @registry.register(
     name="modify_grid",
-    description="Modifies coordinates or renames an existing gridline.",
+    description="Modifies coordinates or renames an existing gridline. Coordinates are specified in feet.",
     custom_instructions="Grid curves will only be modified if all start/end coordinates are provided. Otherwise, only rename applies. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
             "grid_id": {"type": "string", "description": "The UniqueId of the grid to edit."},
             "name": {"type": "string", "description": "Optional new name for the grid."},
-            "start_x": {"type": "number", "description": "Optional new start X (feet)."},
-            "start_y": {"type": "number", "description": "Optional new start Y (feet)."},
-            "end_x": {"type": "number", "description": "Optional new end X (feet)."},
-            "end_y": {"type": "number", "description": "Optional new end Y (feet)."}
+            "start_x": {"type": "number", "description": "Optional new start X coordinate in feet."},
+            "start_y": {"type": "number", "description": "Optional new start Y coordinate in feet."},
+            "end_x": {"type": "number", "description": "Optional new end X coordinate in feet."},
+            "end_y": {"type": "number", "description": "Optional new end Y coordinate in feet."}
         },
         "required": ["grid_id"]
     }
@@ -196,6 +214,7 @@ def modify_grid(doc, ui_app, tool_input):
     name="delete_grid",
     description="Deletes an existing gridline.",
     custom_instructions="Be careful when deleting grids as they may have elements dependent on them.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -212,8 +231,9 @@ def delete_grid(doc, ui_app, tool_input):
 
 @registry.register(
     name="create_level",
-    description="Creates a new horizontal datum level with options to configure custom visual extents.",
+    description="Creates a new horizontal datum level with options to configure custom visual extents. Elevation and boundary coordinates are specified in feet.",
     custom_instructions="Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -258,8 +278,9 @@ def create_level(doc, ui_app, tool_input):
 
 @registry.register(
     name="modify_level",
-    description="Modifies height elevation, renames, or updates the 3D/2D extents of an existing level.",
+    description="Modifies height elevation, renames, or updates the 3D/2D extents of an existing level. Elevation and coordinates are specified in feet.",
     custom_instructions="Modifying levels updates all elements attached to the level. Exercise caution when altering heights.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -309,6 +330,7 @@ def modify_level(doc, ui_app, tool_input):
     name="delete_level",
     description="Deletes an existing level. Deletes all associated plan views automatically.",
     custom_instructions="Revit requires at least one level to exist in the document at all times. Attempting to delete the last level will trigger an exception. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -325,7 +347,9 @@ def delete_level(doc, ui_app, tool_input):
 
 @registry.register(
     name="fetch_structural_columns",
-    description="Fetches all structural columns in the project, including their location coordinates, base/top levels, base/top offsets, rotation, and type information.",
+    description="Fetches all structural columns in the project, including their location coordinates, base/top levels, base/top offsets, rotation, and type information. Coordinates and offsets are returned in feet; rotation angle is in degrees.",
+    measurement_unit="feet",
+    rotation_unit="degrees",
     parameters={
         "type": "object",
         "properties": {},
@@ -340,6 +364,7 @@ def fetch_structural_columns(doc, ui_app, tool_input):
 @registry.register(
     name="fetch_structural_column_types",
     description="Fetches all loaded structural column family types, including their names and unique type IDs.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {},
@@ -353,8 +378,10 @@ def fetch_structural_column_types(doc, ui_app, tool_input):
 
 @registry.register(
     name="create_structural_column",
-    description="Creates a new vertical structural column at specific 2D coordinates.",
+    description="Creates a new vertical structural column at specific 2D coordinates. Location and offsets are specified in feet; rotation angle is in degrees.",
     custom_instructions="To place structural columns at grid intersections (a standard AEC practice), first call 'fetch_grids' to query grid coordinates, calculate the intersection point in feet, and pass it to this tool.",
+    measurement_unit="feet",
+    rotation_unit="degrees",
     parameters={
         "type": "object",
         "properties": {
@@ -396,7 +423,9 @@ def create_structural_column(doc, ui_app, tool_input):
 
 @registry.register(
     name="modify_structural_column",
-    description="Modifies attributes (location, levels, offsets, rotation, type) of an existing structural column instance.",
+    description="Modifies attributes (location, levels, offsets, rotation, type) of an existing structural column instance. Location and offsets are specified in feet; rotation angle is in degrees.",
+    measurement_unit="feet",
+    rotation_unit="degrees",
     parameters={
         "type": "object",
         "properties": {
@@ -445,6 +474,7 @@ def modify_structural_column(doc, ui_app, tool_input):
 @registry.register(
     name="delete_structural_column",
     description="Deletes an existing structural column instance.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -461,7 +491,8 @@ def delete_structural_column(doc, ui_app, tool_input):
 
 @registry.register(
     name="duplicate_structural_column_type",
-    description="Duplicates an existing structural column type and modifies its dimensions (type parameters).",
+    description="Duplicates an existing structural column type and modifies its dimensions (type parameters). The dimensions dictionary maps parameter names to values in feet.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -488,7 +519,8 @@ def duplicate_structural_column_type(doc, ui_app, tool_input):
 
 @registry.register(
     name="modify_structural_column_type",
-    description="Modifies the type parameters (dimensions) of an existing structural column family type.",
+    description="Modifies the type parameters (dimensions) of an existing structural column family type. The dimensions dictionary maps parameter names to values in feet.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {
@@ -514,6 +546,7 @@ def modify_structural_column_type(doc, ui_app, tool_input):
 @registry.register(
     name="delete_structural_column_type",
     description="Deletes a structural column type from the project document.",
+    measurement_unit="feet",
     parameters={
         "type": "object",
         "properties": {

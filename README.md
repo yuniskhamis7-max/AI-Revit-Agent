@@ -458,6 +458,14 @@ Reversing this order will trigger Revit exceptions.
 
 ---
 
+### Measurement & Rotation Unit Rules
+
+All physical dimensions, coordinates, elevations, offsets, spacing, and lengths are represented and processed in decimal **feet** (the standard internal unit of the Autodesk Revit API). Rotation angles are specified in **degrees**.
+* **Schemas**: Every tool schema includes explicit `measurement_unit` (default: `"feet"`) and `rotation_unit` parameters which are fed directly to the LLM (Gemini) tool definitions.
+* **Results**: Every tool execution and fetch function result includes explicit `"measurement_unit": "feet"` (and `"rotation_unit": "degrees"` where applicable) fields in its response payload.
+
+---
+
 ## 8. Configuration & Environment Variables
 
 The backend is configured via `backend/.env`. Key parameters:

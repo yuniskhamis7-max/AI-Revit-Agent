@@ -85,6 +85,7 @@ class GridTools(object):
         return OrderedDict([
             ("status", "success"),
             ("message", "Successfully fetched all project grids."),
+            ("measurement_unit", "feet"),
             ("data", OrderedDict([("grids", grids_data)]))
         ])
 
@@ -141,6 +142,7 @@ class GridTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Grid '{}' successfully created.".format(name)),
+                    ("measurement_unit", "feet"),
                     ("data", OrderedDict([("element_id", new_grid.UniqueId)]))
                 ])
             except Exception as ex:
@@ -222,6 +224,7 @@ class GridTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Grid '{}' successfully modified.".format(final_name)),
+                    ("measurement_unit", "feet"),
                     ("data", OrderedDict([("element_id", final_id)]))
                 ])
             except Exception as ex:
@@ -252,7 +255,8 @@ class GridTools(object):
                 trans.Commit()
                 return OrderedDict([
                     ("status", "success"),
-                    ("message", "Grid successfully deleted.")
+                    ("message", "Grid successfully deleted."),
+                    ("measurement_unit", "feet")
                 ])
             except Exception as ex:
                 trans.RollBack()

@@ -122,6 +122,14 @@ def _build_function_declarations(tool_schemas: list[dict]) -> list[types.Functio
         if custom_instructions:
             description = description + "\n\nCUSTOM INSTRUCTIONS: " + custom_instructions
 
+        measurement_unit = schema.get("measurement_unit")
+        if measurement_unit:
+            description = description + "\n\nMEASUREMENT UNIT: " + measurement_unit
+
+        rotation_unit = schema.get("rotation_unit")
+        if rotation_unit:
+            description = description + "\n\nROTATION UNIT: " + rotation_unit
+
         declarations.append(
             types.FunctionDeclaration(
                 name=name,

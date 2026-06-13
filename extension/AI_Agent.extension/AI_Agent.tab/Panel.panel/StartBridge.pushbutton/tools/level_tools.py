@@ -254,6 +254,7 @@ class LevelTools(object):
         return OrderedDict([
             ("status", "success"),
             ("message", "Successfully fetched levels with precise visual bounds."),
+            ("measurement_unit", "feet"),
             ("data", OrderedDict([("levels", levels_data)]))
         ])
 
@@ -303,6 +304,7 @@ class LevelTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Level '{}' successfully created.".format(name)),
+                    ("measurement_unit", "feet"),
                     ("data", OrderedDict([("element_id", new_level.UniqueId)]))
                 ])
             except Exception as ex:
@@ -377,6 +379,7 @@ class LevelTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Level '{}' successfully modified.".format(level.Name)),
+                    ("measurement_unit", "feet"),
                     ("data", OrderedDict([("element_id", level.UniqueId)]))
                 ])
             except Exception as ex:
@@ -457,7 +460,8 @@ class LevelTools(object):
                 trans.Commit()
                 return OrderedDict([
                     ("status", "success"),
-                    ("message", "Level and its associated views successfully deleted.")
+                    ("message", "Level and its associated views successfully deleted."),
+                    ("measurement_unit", "feet")
                 ])
             except Exception as ex:
                 trans.RollBack()

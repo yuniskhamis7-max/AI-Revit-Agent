@@ -217,6 +217,8 @@ class ColumnTools(object):
             return OrderedDict([
                 ("status", "success"),
                 ("message", "Successfully fetched all project structural columns."),
+                ("measurement_unit", "feet"),
+                ("rotation_unit", "degrees"),
                 ("data", OrderedDict([("columns", columns_data)]))
             ])
         except Exception as ex:
@@ -249,6 +251,7 @@ class ColumnTools(object):
             return OrderedDict([
                 ("status", "success"),
                 ("message", "Successfully fetched structural column types."),
+                ("measurement_unit", "feet"),
                 ("data", OrderedDict([("column_types", types_data)]))
             ])
         except Exception as ex:
@@ -338,6 +341,8 @@ class ColumnTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column successfully created."),
+                    ("measurement_unit", "feet"),
+                    ("rotation_unit", "degrees"),
                     ("data", OrderedDict([("element_id", new_col.UniqueId)]))
                 ])
             except Exception as ex:
@@ -441,6 +446,8 @@ class ColumnTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column successfully modified."),
+                    ("measurement_unit", "feet"),
+                    ("rotation_unit", "degrees"),
                     ("data", OrderedDict([("element_id", column.UniqueId)]))
                 ])
             except Exception as ex:
@@ -471,7 +478,8 @@ class ColumnTools(object):
                 trans.Commit()
                 return OrderedDict([
                     ("status", "success"),
-                    ("message", "Structural column successfully deleted.")
+                    ("message", "Structural column successfully deleted."),
+                    ("measurement_unit", "feet")
                 ])
             except Exception as ex:
                 trans.RollBack()
@@ -529,6 +537,7 @@ class ColumnTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column type '{}' successfully created.".format(new_type_name)),
+                    ("measurement_unit", "feet"),
                     ("data", OrderedDict([
                         ("column_type_id", new_symbol.UniqueId),
                         ("updated_parameters", updated),
@@ -582,6 +591,7 @@ class ColumnTools(object):
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column type parameters successfully modified."),
+                    ("measurement_unit", "feet"),
                     ("data", OrderedDict([
                         ("column_type_id", symbol.UniqueId),
                         ("updated_parameters", updated),
@@ -615,7 +625,8 @@ class ColumnTools(object):
                 trans.Commit()
                 return OrderedDict([
                     ("status", "success"),
-                    ("message", "Structural column type successfully deleted.")
+                    ("message", "Structural column type successfully deleted."),
+                    ("measurement_unit", "feet")
                 ])
             except Exception as ex:
                 trans.RollBack()
