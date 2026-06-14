@@ -32,6 +32,7 @@ class MessageOut(BaseModel):
     tool_name: str | None = None
     approved: bool | None = None
     created_at: datetime
+    images: list[str] | None = None
 
     class Config:
         from_attributes = True

@@ -69,6 +69,7 @@ export interface Message {
   tool_name?: string | null;
   approved?: boolean | null;
   created_at: string;
+  images?: string[] | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +212,7 @@ export interface SSEEvent {
  * @property toolCalls     - List of tool calls with their live status.
  * @property createdAt     - JavaScript Date when the message was created.
  * @property isStreaming   - True if this message is still being streamed.
+ * @property images        - List of base64 images attached to this message.
  */
 export interface ChatMessage {
   id: string;
@@ -221,6 +223,7 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
   createdAt: Date;
   isStreaming?: boolean;
+  images?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -28,10 +28,18 @@ from services.tool_registry import registry
 
 settings = get_settings()
 
+# Ensure the data directory exists for logging and database
+log_dir = Path(__file__).parent / "data"
+log_dir.mkdir(parents=True, exist_ok=True)
+log_file = log_dir / "backend.log"
+
 logging.basicConfig(
     level=getattr(logging, settings.log_level, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, encoding="utf-8"),
+    ],
 )
 
 logger = logging.getLogger(__name__)

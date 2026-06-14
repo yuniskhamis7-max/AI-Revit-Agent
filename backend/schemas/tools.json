@@ -1,296 +1,82 @@
 [
   {
-    "name": "delete_level",
-    "description": "Deletes an existing level. Deletes all associated plan views automatically.",
-    "custom_instructions": "Revit requires at least one level to exist in the document at all times. Attempting to delete the last level will trigger an exception. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
+    "name": "modify_level",
+    "description": "Modifies height elevation, renames, or updates the 3D/2D extents of an existing level. Elevation and coordinates are specified in feet.",
+    "custom_instructions": "Modifying levels updates all elements attached to the level. Exercise caution when altering heights.",
+    "measurement_unit": "feet",
     "parameters": {
+      "properties": {
+        "min_x": {
+          "description": "Optional new minimum X boundary in feet.",
+          "type": "number"
+        },
+        "max_x": {
+          "description": "Optional new maximum X boundary in feet.",
+          "type": "number"
+        },
+        "elevation": {
+          "description": "Optional new elevation height in feet.",
+          "type": "number"
+        },
+        "max_y": {
+          "description": "Optional new maximum Y boundary in feet.",
+          "type": "number"
+        },
+        "reference_level_id": {
+          "description": "Optional UniqueId of an existing level to copy extents from.",
+          "type": "string"
+        },
+        "level_id": {
+          "description": "The UniqueId of the target level.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Optional new name for the level.",
+          "type": "string"
+        },
+        "min_y": {
+          "description": "Optional new minimum Y boundary in feet.",
+          "type": "number"
+        },
+        "maximize_extents": {
+          "description": "Optional option to maximize 3D extents.",
+          "type": "boolean"
+        }
+      },
       "required": [
         "level_id"
       ],
-      "properties": {
-        "level_id": {
-          "type": "string",
-          "description": "The UniqueId of the target level."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "modify_structural_column",
-    "description": "Modifies attributes (location, levels, offsets, rotation, type) of an existing structural column instance.",
-    "parameters": {
-      "required": [
-        "column_id"
-      ],
-      "properties": {
-        "y": {
-          "type": "number",
-          "description": "Optional new Y coordinate in feet."
-        },
-        "column_id": {
-          "type": "string",
-          "description": "UniqueId of the target structural column instance."
-        },
-        "x": {
-          "type": "number",
-          "description": "Optional new X coordinate in feet."
-        },
-        "top_offset": {
-          "type": "number",
-          "description": "Optional new top offset in feet."
-        },
-        "rotation_degrees": {
-          "type": "number",
-          "description": "Optional new absolute rotation in degrees around Z axis."
-        },
-        "base_level_id": {
-          "type": "string",
-          "description": "Optional UniqueId or Name of new base level."
-        },
-        "top_level_id": {
-          "type": "string",
-          "description": "Optional UniqueId or Name of new top level."
-        },
-        "column_type_id": {
-          "type": "string",
-          "description": "Optional new structural column type UniqueId or name."
-        },
-        "base_offset": {
-          "type": "number",
-          "description": "Optional new base offset in feet."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "delete_grid",
-    "description": "Deletes an existing gridline.",
-    "custom_instructions": "Be careful when deleting grids as they may have elements dependent on them.",
-    "parameters": {
-      "required": [
-        "grid_id"
-      ],
-      "properties": {
-        "grid_id": {
-          "type": "string",
-          "description": "The UniqueId of the target grid."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "fetch_structural_column_types",
-    "description": "Fetches all loaded structural column family types, including their names and unique type IDs.",
-    "parameters": {
-      "required": [],
-      "properties": {},
-      "type": "object"
-    }
-  },
-  {
-    "name": "modify_structural_column_type",
-    "description": "Modifies the type parameters (dimensions) of an existing structural column family type.",
-    "parameters": {
-      "required": [
-        "column_type_id",
-        "dimensions"
-      ],
-      "properties": {
-        "dimensions": {
-          "description": "Dictionary of type parameter names mapping to float values in feet.",
-          "additionalProperties": {
-            "type": "number"
-          },
-          "type": "object"
-        },
-        "column_type_id": {
-          "type": "string",
-          "description": "UniqueId or Name of structural column type to edit."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "delete_structural_column",
-    "description": "Deletes an existing structural column instance.",
-    "parameters": {
-      "required": [
-        "column_id"
-      ],
-      "properties": {
-        "column_id": {
-          "type": "string",
-          "description": "UniqueId of the structural column to delete."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "delete_structural_column_type",
-    "description": "Deletes a structural column type from the project document.",
-    "parameters": {
-      "required": [
-        "column_type_id"
-      ],
-      "properties": {
-        "column_type_id": {
-          "type": "string",
-          "description": "UniqueId of target structural column type to delete."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "modify_grid",
-    "description": "Modifies coordinates or renames an existing gridline.",
-    "custom_instructions": "Grid curves will only be modified if all start/end coordinates are provided. Otherwise, only rename applies. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
-    "parameters": {
-      "required": [
-        "grid_id"
-      ],
-      "properties": {
-        "end_x": {
-          "type": "number",
-          "description": "Optional new end X (feet)."
-        },
-        "start_y": {
-          "type": "number",
-          "description": "Optional new start Y (feet)."
-        },
-        "start_x": {
-          "type": "number",
-          "description": "Optional new start X (feet)."
-        },
-        "name": {
-          "type": "string",
-          "description": "Optional new name for the grid."
-        },
-        "end_y": {
-          "type": "number",
-          "description": "Optional new end Y (feet)."
-        },
-        "grid_id": {
-          "type": "string",
-          "description": "The UniqueId of the grid to edit."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "fetch_levels",
-    "description": "Fetches all levels in the project, including their absolute 3D model boundary extents.",
-    "custom_instructions": "Returns precise visual coordinates and elevations. If different levels have different boundary extents in the model, you MUST ask the user which level's extents the grids should fit before creating or modifying grids.",
-    "parameters": {
-      "required": [],
-      "properties": {},
-      "type": "object"
-    }
-  },
-  {
-    "name": "create_structural_column",
-    "description": "Creates a new vertical structural column at specific 2D coordinates.",
-    "custom_instructions": "To place structural columns at grid intersections (a standard AEC practice), first call 'fetch_grids' to query grid coordinates, calculate the intersection point in feet, and pass it to this tool.",
-    "parameters": {
-      "required": [
-        "x",
-        "y",
-        "base_level_id"
-      ],
-      "properties": {
-        "top_level_id": {
-          "type": "string",
-          "description": "Optional UniqueId or Name of the top level."
-        },
-        "top_offset": {
-          "type": "number",
-          "description": "Optional top level offset in feet. Defaults to 0.0."
-        },
-        "rotation_degrees": {
-          "type": "number",
-          "description": "Optional rotation angle in degrees around Z axis. Defaults to 0.0."
-        },
-        "column_type_id": {
-          "type": "string",
-          "description": "Optional UniqueId or name of structural column family symbol. Omit to use default."
-        },
-        "base_offset": {
-          "type": "number",
-          "description": "Optional base level offset in feet. Defaults to 0.0."
-        },
-        "y": {
-          "type": "number",
-          "description": "Y coordinate in feet."
-        },
-        "x": {
-          "type": "number",
-          "description": "X coordinate in feet."
-        },
-        "base_level_id": {
-          "type": "string",
-          "description": "UniqueId or Name of the base level."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "create_level",
-    "description": "Creates a new horizontal datum level with options to configure custom visual extents.",
-    "custom_instructions": "Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
-    "parameters": {
-      "required": [
-        "name",
-        "elevation"
-      ],
-      "properties": {
-        "min_y": {
-          "type": "number",
-          "description": "Optional minimum Y visual boundary in feet."
-        },
-        "maximize_extents": {
-          "type": "boolean",
-          "description": "Option to maximize the default 3D extents. Defaults to True."
-        },
-        "max_y": {
-          "type": "number",
-          "description": "Optional maximum Y visual boundary in feet."
-        },
-        "name": {
-          "type": "string",
-          "description": "Unique name of the level (e.g., 'Level 3')."
-        },
-        "elevation": {
-          "type": "number",
-          "description": "Elevation height in feet."
-        },
-        "max_x": {
-          "type": "number",
-          "description": "Optional maximum X visual boundary in feet."
-        },
-        "min_x": {
-          "type": "number",
-          "description": "Optional minimum X visual boundary in feet."
-        },
-        "reference_level_id": {
-          "type": "string",
-          "description": "Optional UniqueId of an existing level to copy extents from across views."
-        }
-      },
       "type": "object"
     }
   },
   {
     "name": "create_grid",
-    "description": "Creates a new linear gridline in the project.",
-    "custom_instructions": "Grid names must be unique. The coordinates should align with the project envelope / level boundaries. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
+    "description": "Creates a new linear gridline in the project. The start and end coordinates must be specified in feet.",
+    "custom_instructions": "Grid names must be unique. The coordinates should align with the project envelope / level boundaries. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids. WARNING SCENARIO: Creating a grid line with the same name as an existing grid line will trigger an exception. Always check existing grids and delete duplicates before creating.",
+    "measurement_unit": "feet",
     "parameters": {
+      "properties": {
+        "start_x": {
+          "description": "Start X coordinate in feet.",
+          "type": "number"
+        },
+        "end_y": {
+          "description": "End Y coordinate in feet.",
+          "type": "number"
+        },
+        "name": {
+          "description": "Unique grid label (e.g., 'A', '1').",
+          "type": "string"
+        },
+        "start_y": {
+          "description": "Start Y coordinate in feet.",
+          "type": "number"
+        },
+        "end_x": {
+          "description": "End X coordinate in feet.",
+          "type": "number"
+        }
+      },
       "required": [
         "name",
         "start_x",
@@ -298,124 +84,392 @@
         "end_x",
         "end_y"
       ],
-      "properties": {
-        "end_x": {
-          "type": "number",
-          "description": "End X coordinate in feet."
-        },
-        "start_y": {
-          "type": "number",
-          "description": "Start Y coordinate in feet."
-        },
-        "start_x": {
-          "type": "number",
-          "description": "Start X coordinate in feet."
-        },
-        "name": {
-          "type": "string",
-          "description": "Unique grid label (e.g., 'A', '1')."
-        },
-        "end_y": {
-          "type": "number",
-          "description": "End Y coordinate in feet."
-        }
-      },
       "type": "object"
     }
   },
   {
-    "name": "fetch_structural_columns",
-    "description": "Fetches all structural columns in the project, including their location coordinates, base/top levels, base/top offsets, rotation, and type information.",
+    "name": "create_structural_column",
+    "description": "Creates a new vertical structural column at specific 2D coordinates. Location and offsets are specified in feet; rotation angle is in degrees.",
+    "custom_instructions": "To place structural columns at grid intersections (a standard AEC practice), first call 'fetch_grids' to query grid coordinates, calculate the intersection point in feet, and pass it to this tool. WARNING SCENARIO: Placing a structural column at the exact same coordinates (X, Y) as an existing column will trigger a Revit identical instances warning. To avoid duplicate counting and warnings, always verify existing column coordinates and delete duplicates before creating.",
+    "measurement_unit": "feet",
+    "rotation_unit": "degrees",
     "parameters": {
-      "required": [],
-      "properties": {},
-      "type": "object"
-    }
-  },
-  {
-    "name": "modify_level",
-    "description": "Modifies height elevation, renames, or updates the 3D/2D extents of an existing level.",
-    "custom_instructions": "Modifying levels updates all elements attached to the level. Exercise caution when altering heights.",
-    "parameters": {
-      "required": [
-        "level_id"
-      ],
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Optional new name for the level."
+        "x": {
+          "description": "X coordinate in feet.",
+          "type": "number"
         },
-        "level_id": {
-          "type": "string",
-          "description": "The UniqueId of the target level."
+        "top_level_id": {
+          "description": "Optional UniqueId or Name of the top level.",
+          "type": "string"
         },
-        "max_y": {
-          "type": "number",
-          "description": "Optional new maximum Y boundary in feet."
+        "top_offset": {
+          "description": "Optional top level offset in feet. Defaults to 0.0.",
+          "type": "number"
         },
-        "reference_level_id": {
-          "type": "string",
-          "description": "Optional UniqueId of an existing level to copy extents from."
+        "rotation_degrees": {
+          "description": "Optional rotation angle in degrees around Z axis. Defaults to 0.0.",
+          "type": "number"
         },
-        "min_x": {
-          "type": "number",
-          "description": "Optional new minimum X boundary in feet."
-        },
-        "max_x": {
-          "type": "number",
-          "description": "Optional new maximum X boundary in feet."
-        },
-        "maximize_extents": {
-          "type": "boolean",
-          "description": "Optional option to maximize 3D extents."
-        },
-        "elevation": {
-          "type": "number",
-          "description": "Optional new elevation height in feet."
-        },
-        "min_y": {
-          "type": "number",
-          "description": "Optional new minimum Y boundary in feet."
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "duplicate_structural_column_type",
-    "description": "Duplicates an existing structural column type and modifies its dimensions (type parameters).",
-    "parameters": {
-      "required": [
-        "column_type_id",
-        "new_type_name"
-      ],
-      "properties": {
-        "new_type_name": {
-          "type": "string",
-          "description": "Name for the duplicated type."
-        },
-        "dimensions": {
-          "description": "Optional dictionary of type parameter names mapping to float values in feet.",
-          "additionalProperties": {
-            "type": "number"
-          },
-          "type": "object"
+        "base_offset": {
+          "description": "Optional base level offset in feet. Defaults to 0.0.",
+          "type": "number"
         },
         "column_type_id": {
-          "type": "string",
-          "description": "UniqueId or Name of the source type to duplicate."
+          "description": "Optional UniqueId or name of structural column family symbol. Omit to use default.",
+          "type": "string"
+        },
+        "base_level_id": {
+          "description": "UniqueId or Name of the base level.",
+          "type": "string"
+        },
+        "y": {
+          "description": "Y coordinate in feet.",
+          "type": "number"
         }
       },
+      "required": [
+        "x",
+        "y",
+        "base_level_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "delete_structural_column_type",
+    "description": "Deletes a structural column type from the project document.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "column_type_id": {
+          "description": "UniqueId of target structural column type to delete.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "column_type_id"
+      ],
       "type": "object"
     }
   },
   {
     "name": "fetch_grids",
-    "description": "Fetches all gridlines in the project, including their unique IDs, labels, endpoints, and curvature details.",
+    "description": "Fetches all gridlines in the project, including their unique IDs, labels, endpoints, and curvature details. All coordinates and arc radii are returned in feet.",
     "custom_instructions": "Query this to understand the existing grid layout, spacing pattern, and naming convention before editing.",
+    "measurement_unit": "feet",
     "parameters": {
-      "required": [],
       "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "modify_grid",
+    "description": "Modifies coordinates or renames an existing gridline. Coordinates are specified in feet.",
+    "custom_instructions": "Grid curves will only be modified if all start/end coordinates are provided. Otherwise, only rename applies. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "start_x": {
+          "description": "Optional new start X coordinate in feet.",
+          "type": "number"
+        },
+        "grid_id": {
+          "description": "The UniqueId of the grid to edit.",
+          "type": "string"
+        },
+        "end_y": {
+          "description": "Optional new end Y coordinate in feet.",
+          "type": "number"
+        },
+        "name": {
+          "description": "Optional new name for the grid.",
+          "type": "string"
+        },
+        "start_y": {
+          "description": "Optional new start Y coordinate in feet.",
+          "type": "number"
+        },
+        "end_x": {
+          "description": "Optional new end X coordinate in feet.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "grid_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "create_level",
+    "description": "Creates a new horizontal datum level with options to configure custom visual extents. Elevation and boundary coordinates are specified in feet.",
+    "custom_instructions": "Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements. WARNING SCENARIO: Level names must be unique. Creating a level with the same name as an existing level will trigger an exception. Verify existing level names first.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "reference_level_id": {
+          "description": "Optional UniqueId of an existing level to copy extents from across views.",
+          "type": "string"
+        },
+        "maximize_extents": {
+          "description": "Option to maximize the default 3D extents. Defaults to True.",
+          "type": "boolean"
+        },
+        "elevation": {
+          "description": "Elevation height in feet.",
+          "type": "number"
+        },
+        "min_y": {
+          "description": "Optional minimum Y visual boundary in feet.",
+          "type": "number"
+        },
+        "max_x": {
+          "description": "Optional maximum X visual boundary in feet.",
+          "type": "number"
+        },
+        "min_x": {
+          "description": "Optional minimum X visual boundary in feet.",
+          "type": "number"
+        },
+        "max_y": {
+          "description": "Optional maximum Y visual boundary in feet.",
+          "type": "number"
+        },
+        "name": {
+          "description": "Unique name of the level (e.g., 'Level 3').",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "elevation"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "delete_level",
+    "description": "Deletes an existing level. Deletes all associated plan views automatically.",
+    "custom_instructions": "Revit requires at least one level to exist in the document at all times. Attempting to delete the last level will trigger an exception. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "level_id": {
+          "description": "The UniqueId of the target level.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "level_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "fetch_structural_columns",
+    "description": "Fetches all structural columns in the project, including their location coordinates, base/top levels, base/top offsets, rotation, and type information. Coordinates and offsets are returned in feet; rotation angle is in degrees.",
+    "measurement_unit": "feet",
+    "rotation_unit": "degrees",
+    "parameters": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "fetch_levels",
+    "description": "Fetches all levels in the project, including their absolute 3D model boundary extents. All elevations and coordinates are returned in feet.",
+    "custom_instructions": "Returns precise visual coordinates and elevations. If different levels have different boundary extents in the model, you MUST ask the user which level's extents the grids should fit before creating or modifying grids.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "delete_structural_column",
+    "description": "Deletes an existing structural column instance.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "column_id": {
+          "description": "UniqueId of the structural column to delete.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "column_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "modify_structural_column_type",
+    "description": "Modifies the type parameters (dimensions) of an existing structural column family type. The dimensions dictionary maps parameter names to values in feet.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "column_type_id": {
+          "description": "UniqueId or Name of structural column type to edit.",
+          "type": "string"
+        },
+        "dimensions": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Dictionary of type parameter names mapping to float values in feet.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "column_type_id",
+        "dimensions"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "fetch_structural_column_types",
+    "description": "Fetches all loaded structural column family types, including their names and unique type IDs.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "delete_grid",
+    "description": "Deletes an existing gridline.",
+    "custom_instructions": "Be careful when deleting grids as they may have elements dependent on them.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "grid_id": {
+          "description": "The UniqueId of the target grid.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "grid_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "execute_batch",
+    "description": "Executes a list of BIM tool operations sequentially inside a single transaction group. If any operation fails, the entire batch is rolled back.",
+    "custom_instructions": "Use this to execute multiple element modifications (e.g. creating levels, grids, or columns) in a single run.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "calls": {
+          "items": {
+            "properties": {
+              "input": {
+                "description": "The input parameters for the tool.",
+                "type": "object"
+              },
+              "tool": {
+                "description": "The name of the tool to call.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "tool",
+              "input"
+            ],
+            "type": "object"
+          },
+          "description": "List of tool calls to execute sequentially.",
+          "type": "array"
+        }
+      },
+      "required": [
+        "calls"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "modify_structural_column",
+    "description": "Modifies attributes (location, levels, offsets, rotation, type) of an existing structural column instance. Location and offsets are specified in feet; rotation angle is in degrees.",
+    "measurement_unit": "feet",
+    "rotation_unit": "degrees",
+    "parameters": {
+      "properties": {
+        "top_level_id": {
+          "description": "Optional UniqueId or Name of new top level.",
+          "type": "string"
+        },
+        "rotation_degrees": {
+          "description": "Optional new absolute rotation in degrees around Z axis.",
+          "type": "number"
+        },
+        "column_type_id": {
+          "description": "Optional new structural column type UniqueId or name.",
+          "type": "string"
+        },
+        "top_offset": {
+          "description": "Optional new top offset in feet.",
+          "type": "number"
+        },
+        "base_offset": {
+          "description": "Optional new base offset in feet.",
+          "type": "number"
+        },
+        "x": {
+          "description": "Optional new X coordinate in feet.",
+          "type": "number"
+        },
+        "column_id": {
+          "description": "UniqueId of the target structural column instance.",
+          "type": "string"
+        },
+        "y": {
+          "description": "Optional new Y coordinate in feet.",
+          "type": "number"
+        },
+        "base_level_id": {
+          "description": "Optional UniqueId or Name of new base level.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "column_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "duplicate_structural_column_type",
+    "description": "Duplicates an existing structural column type and modifies its dimensions (type parameters). The dimensions dictionary maps parameter names to values in feet.",
+    "measurement_unit": "feet",
+    "parameters": {
+      "properties": {
+        "column_type_id": {
+          "description": "UniqueId or Name of the source type to duplicate.",
+          "type": "string"
+        },
+        "new_type_name": {
+          "description": "Name for the duplicated type.",
+          "type": "string"
+        },
+        "dimensions": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Optional dictionary of type parameter names mapping to float values in feet.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "column_type_id",
+        "new_type_name"
+      ],
       "type": "object"
     }
   }

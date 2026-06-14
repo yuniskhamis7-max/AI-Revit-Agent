@@ -41,11 +41,22 @@ class ToolRegistry(object):
         """Parses the payload, routes to the tool, and returns a JSON string."""
         import json
         try:
+            # Self-healing package reload to pick up new tools on disk
+            try:
+                import sys
+                import tools
+                if 'tools' in sys.modules:
+                    reload(sys.modules['tools'])
+                    self._tools.update(sys.modules['tools'].registry._tools)
+            except Exception:
+                pass
+
             payload = json.loads(payload_str)
             tool_name = payload.get("tool")
             tool_input = payload.get("input") or {}
 
             if tool_name == "get_tools":
+                reload_err = None
                 try:
                     import sys
                     self._tools.clear()
@@ -53,13 +64,17 @@ class ToolRegistry(object):
                         reload(sys.modules['tools'])
                         new_registry = sys.modules['tools'].registry
                         self._tools.update(new_registry._tools)
-                except Exception:
-                    pass
+                    else:
+                        reload_err = "tools not in sys.modules"
+                except Exception as ex:
+                    reload_err = "Reload exception: " + str(ex)
 
                 discovery_res = OrderedDict([
                     ("status", "success"),
                     ("tools", self.get_schemas())
                 ])
+                if reload_err:
+                    discovery_res["reload_error"] = reload_err
                 return json.dumps(discovery_res)
 
             if tool_name not in self._tools:
@@ -73,6 +88,8 @@ class ToolRegistry(object):
             # Dynamically reload submodules to pick up code edits instantly
             try:
                 import sys
+                if 'tools.utils' in sys.modules:
+                    reload(sys.modules['tools.utils'])
                 if 'tools.level_tools' in sys.modules:
                     reload(sys.modules['tools.level_tools'])
                 if 'tools.grid_tools' in sys.modules:
@@ -99,6 +116,7 @@ registry = ToolRegistry()
 # =====================================================================
 # ACTION TOOL REGISTRATION AND ROUTING
 # =====================================================================
+
 
 @registry.register(
     name="fetch_levels",
@@ -135,7 +153,7 @@ def fetch_grids(doc, ui_app, tool_input):
 @registry.register(
     name="create_grid",
     description="Creates a new linear gridline in the project. The start and end coordinates must be specified in feet.",
-    custom_instructions="Grid names must be unique. The coordinates should align with the project envelope / level boundaries. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids.",
+    custom_instructions="Grid names must be unique. The coordinates should align with the project envelope / level boundaries. Do NOT ask redundant, obvious, or unnecessary questions about dimensions, count, spacing, or coordinate origin alignment if they can be determined directly from the level extents or existing grids. WARNING SCENARIO: Creating a grid line with the same name as an existing grid line will trigger an exception. Always check existing grids and delete duplicates before creating.",
     measurement_unit="feet",
     parameters={
         "type": "object",
@@ -232,7 +250,7 @@ def delete_grid(doc, ui_app, tool_input):
 @registry.register(
     name="create_level",
     description="Creates a new horizontal datum level with options to configure custom visual extents. Elevation and boundary coordinates are specified in feet.",
-    custom_instructions="Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements.",
+    custom_instructions="Elevation heights are in decimal feet. Provide a reference level ID when duplicating view extents of existing project configurations. When replacing levels: CREATE new levels FIRST, THEN delete old ones. Never delete all levels before creating replacements. WARNING SCENARIO: Level names must be unique. Creating a level with the same name as an existing level will trigger an exception. Verify existing level names first.",
     measurement_unit="feet",
     parameters={
         "type": "object",
@@ -379,7 +397,7 @@ def fetch_structural_column_types(doc, ui_app, tool_input):
 @registry.register(
     name="create_structural_column",
     description="Creates a new vertical structural column at specific 2D coordinates. Location and offsets are specified in feet; rotation angle is in degrees.",
-    custom_instructions="To place structural columns at grid intersections (a standard AEC practice), first call 'fetch_grids' to query grid coordinates, calculate the intersection point in feet, and pass it to this tool.",
+    custom_instructions="To place structural columns at grid intersections (a standard AEC practice), first call 'fetch_grids' to query grid coordinates, calculate the intersection point in feet, and pass it to this tool. WARNING SCENARIO: Placing a structural column at the exact same coordinates (X, Y) as an existing column will trigger a Revit identical instances warning. To avoid duplicate counting and warnings, always verify existing column coordinates and delete duplicates before creating.",
     measurement_unit="feet",
     rotation_unit="degrees",
     parameters={
@@ -559,3 +577,108 @@ def delete_structural_column_type(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
     column_type_id = tool_input["column_type_id"]
     return ColumnTools(doc).delete_type(column_type_id)
+
+
+@registry.register(
+    name="execute_batch",
+    description="Executes a list of BIM tool operations sequentially inside a single transaction group. If any operation fails, the entire batch is rolled back.",
+    custom_instructions="Use this to execute multiple element modifications (e.g. creating levels, grids, or columns) in a single run.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "calls": {
+                "type": "array",
+                "description": "List of tool calls to execute sequentially.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tool": {"type": "string", "description": "The name of the tool to call."},
+                        "input": {"type": "object", "description": "The input parameters for the tool."}
+                    },
+                    "required": ["tool", "input"]
+                }
+            }
+        },
+        "required": ["calls"]
+    }
+)
+def execute_batch(doc, ui_app, tool_input):
+    from Autodesk.Revit.DB import TransactionGroup
+    from collections import OrderedDict
+    
+    calls = tool_input.get("calls", [])
+    if not calls:
+        return OrderedDict([
+            ("status", "error"),
+            ("message", "Empty batch request: no calls provided.")
+        ])
+        
+    tg = TransactionGroup(doc, "Agent - Execute Batch")
+    tg.Start()
+    
+    results = []
+    success = True
+    error_message = None
+    
+    try:
+        for idx, call in enumerate(calls):
+            t_name = call.get("tool")
+            t_input = call.get("input") or {}
+            
+            if t_name == "execute_batch":
+                success = False
+                error_message = "Nested execute_batch calls are not allowed."
+                break
+                
+            if t_name not in registry._tools:
+                success = False
+                error_message = "Tool '{}' (call index {}) not found in registry.".format(t_name, idx)
+                break
+                
+            # Retrieve tool callable
+            tool_fn = registry._tools[t_name]["callable"]
+            
+            # Execute
+            try:
+                res = tool_fn(doc, ui_app, t_input)
+            except Exception as e:
+                res = {"status": "error", "message": "Python tool execution exception: " + str(e)}
+                
+            results.append(OrderedDict([
+                ("tool", t_name),
+                ("input", t_input),
+                ("result", res)
+            ]))
+            
+            if isinstance(res, dict) and res.get("status") == "error":
+                success = False
+                error_message = "Tool '{}' at index {} failed: {}".format(t_name, idx, res.get("message", "No error message"))
+                break
+                
+        if success:
+            tg.Assimilate()
+            return OrderedDict([
+                ("status", "success"),
+                ("message", "Successfully executed all {} batch operations.".format(len(calls))),
+                ("measurement_unit", "feet"),
+                ("data", OrderedDict([("results", results)]))
+            ])
+        else:
+            tg.RollBack()
+            return OrderedDict([
+                ("status", "error"),
+                ("message", "Batch aborted and rolled back. " + error_message),
+                ("data", OrderedDict([("results", results)]))
+            ])
+            
+    except Exception as ex:
+        try:
+            tg.RollBack()
+        except Exception:
+            pass
+        return OrderedDict([
+            ("status", "error"),
+            ("message", "Batch system runtime exception: " + str(ex)),
+            ("data", OrderedDict([("results", results)]))
+        ])
+

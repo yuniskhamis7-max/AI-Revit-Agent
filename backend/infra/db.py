@@ -57,9 +57,16 @@ class Database:
                     tool_call_id TEXT,
                     approved INTEGER, -- 0 for false, 1 for true, null for none
                     created_at TEXT NOT NULL,
+                    images TEXT,
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
                 );
             """)
+            
+            # Dynamic migration check to add images column if missing in existing database
+            try:
+                await db.execute("ALTER TABLE messages ADD COLUMN images TEXT;")
+            except aiosqlite.OperationalError:
+                pass
 
             # 3. Provider configs table
             await db.execute("""
@@ -125,7 +132,7 @@ class Database:
                 (new_name, now, session_id)
             ) as cursor:
                 if cursor.rowcount == 0:
-                    return None
+                     return None
             await db.commit()
         return await self.get_session(session_id)
 
@@ -150,12 +157,19 @@ class Database:
                 (session_id,)
             ) as cursor:
                 rows = await cursor.fetchall()
-                # Helper: normalise approved boolean (0/1 -> False/True)
+                # Helper: normalise approved boolean (0/1 -> False/True) and parse images
                 res = []
                 for row in rows:
                     d = dict(row)
                     if d["approved"] is not None:
                         d["approved"] = bool(d["approved"])
+                    if d.get("images"):
+                        try:
+                            d["images"] = json.loads(d["images"])
+                        except Exception:
+                            d["images"] = []
+                    else:
+                        d["images"] = []
                     res.append(d)
                 return res
 
@@ -169,7 +183,8 @@ class Database:
         tool_name: str | None = None,
         tool_call_id: str | None = None,
         approved: bool | None = None,
-        message_id: str | None = None
+        message_id: str | None = None,
+        images: str | None = None
     ) -> dict:
         """Save a new message and refresh the session's updated_at timestamp."""
         now = _now_iso()
@@ -181,10 +196,10 @@ class Database:
             await db.execute(
                 """
                 INSERT INTO messages (
-                    id, session_id, role, content, tool_calls, agent_thoughts, tool_name, tool_call_id, approved, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    id, session_id, role, content, tool_calls, agent_thoughts, tool_name, tool_call_id, approved, created_at, images
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (mid, session_id, role, content, tool_calls, agent_thoughts, tool_name, tool_call_id, approved_int, now)
+                (mid, session_id, role, content, tool_calls, agent_thoughts, tool_name, tool_call_id, approved_int, now, images)
             )
             # 2. Update session updated_at
             await db.execute(
@@ -192,6 +207,13 @@ class Database:
                 (now, session_id)
             )
             await db.commit()
+
+        parsed_images = []
+        if images:
+            try:
+                parsed_images = json.loads(images)
+            except Exception:
+                pass
 
         return {
             "id": mid,
@@ -203,7 +225,8 @@ class Database:
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
             "approved": approved,
-            "created_at": now
+            "created_at": now,
+            "images": parsed_images
         }
 
     # ─────────────────────────────────────────────────────────────────────────

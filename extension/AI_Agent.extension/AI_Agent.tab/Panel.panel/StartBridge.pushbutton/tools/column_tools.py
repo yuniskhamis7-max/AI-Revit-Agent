@@ -306,6 +306,13 @@ class ColumnTools(object):
         location = XYZ(float(x), float(y), z)
         
         with Transaction(self.doc, "Agent - Create Structural Column") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 if not symbol.IsActive:
@@ -336,7 +343,8 @@ class ColumnTools(object):
                     ElementTransformUtils.RotateElement(self.doc, new_col.Id, axis_line, angle_rad)
                     
                 new_col.Pinned = True
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 
                 return OrderedDict([
                     ("status", "success"),
@@ -346,7 +354,8 @@ class ColumnTools(object):
                     ("data", OrderedDict([("element_id", new_col.UniqueId)]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to create structural column: " + str(ex)}
 
     def modify(self, column_id, x=None, y=None, base_level_id=None, top_level_id=None, base_offset=None, top_offset=None, rotation_degrees=None, column_type_id=None):
@@ -375,6 +384,13 @@ class ColumnTools(object):
             return {"status": "error", "message": "Structural column element not found."}
             
         with Transaction(self.doc, "Agent - Modify Structural Column") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 was_pinned = column.Pinned
@@ -441,7 +457,8 @@ class ColumnTools(object):
                         column.Symbol = symbol
                         
                 column.Pinned = was_pinned
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 
                 return OrderedDict([
                     ("status", "success"),
@@ -451,7 +468,8 @@ class ColumnTools(object):
                     ("data", OrderedDict([("element_id", column.UniqueId)]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to modify structural column: " + str(ex)}
 
     def delete(self, column_id):
@@ -471,18 +489,27 @@ class ColumnTools(object):
             return {"status": "error", "message": "Structural column element not found."}
             
         with Transaction(self.doc, "Agent - Delete Structural Column") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 column.Pinned = False
                 self.doc.Delete(column.Id)
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column successfully deleted."),
                     ("measurement_unit", "feet")
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to delete structural column: " + str(ex)}
 
     def duplicate_type(self, column_type_id, new_type_name, dimensions=None):
@@ -516,6 +543,13 @@ class ColumnTools(object):
             return {"status": "error", "message": "Source structural column type not found."}
             
         with Transaction(self.doc, "Agent - Duplicate Structural Column Type") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 new_symbol = symbol.Duplicate(new_type_name)
@@ -533,7 +567,8 @@ class ColumnTools(object):
                         else:
                             failed.append("{} (not found)".format(param_name))
                             
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column type '{}' successfully created.".format(new_type_name)),
@@ -545,7 +580,8 @@ class ColumnTools(object):
                     ]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to duplicate type: " + str(ex)}
 
     def modify_type(self, column_type_id, dimensions):
@@ -573,6 +609,13 @@ class ColumnTools(object):
             return {"status": "error", "message": "Structural column type not found."}
             
         with Transaction(self.doc, "Agent - Modify Structural Column Type") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 updated = []
@@ -587,7 +630,8 @@ class ColumnTools(object):
                     else:
                         failed.append("{} (not found)".format(param_name))
                         
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column type parameters successfully modified."),
@@ -599,7 +643,8 @@ class ColumnTools(object):
                     ]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to modify structural column type parameters: " + str(ex)}
 
     def delete_type(self, column_type_id):
@@ -619,15 +664,24 @@ class ColumnTools(object):
             return {"status": "error", "message": "Structural column type not found."}
             
         with Transaction(self.doc, "Agent - Delete Structural Column Type") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 self.doc.Delete(symbol.Id)
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Structural column type successfully deleted."),
                     ("measurement_unit", "feet")
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to delete structural column type: " + str(ex)}

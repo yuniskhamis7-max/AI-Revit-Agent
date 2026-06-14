@@ -36,12 +36,13 @@ export function useChat() {
    *
    * @param userText - The user's input text (trimmed before sending).
    */
-  const sendMessage = useCallback(async (userText: string) => {
+  const sendMessage = useCallback(async (userText: string, images?: string[]) => {
     const { activeSessionId } = useSessionStore.getState();
     const { activeProvider, activeModel } = useProviderStore.getState();
     const messageStore = useMessageStore.getState();
 
-    if (!activeSessionId || !userText.trim()) return;
+    const trimmed = userText.trim();
+    if (!activeSessionId || (!trimmed && !images?.length)) return;
 
     // Cancel previous stream if still open
     abortRef.current?.abort();
@@ -51,17 +52,19 @@ export function useChat() {
     messageStore.addMessage({
       id: crypto.randomUUID(),
       role: 'user',
-      content: userText.trim(),
+      content: trimmed,
       createdAt: new Date(),
+      images: images?.length ? images : undefined,
     });
 
     try {
       const stream = streamChat(
         {
           session_id: activeSessionId,
-          message: userText.trim(),
+          message: trimmed,
           provider: activeProvider,
           model: activeModel,
+          images: images?.length ? images : undefined,
         },
         abortRef.current.signal,
       );

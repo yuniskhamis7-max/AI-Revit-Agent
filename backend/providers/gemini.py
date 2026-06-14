@@ -261,11 +261,11 @@ class GeminiProvider(AIProvider):
 
     def _send_with_retry(self, contents, config):
         """
-        Execute a synchronous Gemini generate_content call with 429 retry logic.
+        Execute a synchronous Gemini generate_content call with retry logic.
 
         Runs inside a thread-pool executor (called from stream_agent_turn).
-        On RESOURCE_EXHAUSTED errors, waits for the retry delay specified in
-        the error message and retries up to _MAX_RETRIES times.
+        On RESOURCE_EXHAUSTED or transient server errors (like 503 UNAVAILABLE),
+        waits and retries up to _MAX_RETRIES times.
 
         Args:
             contents: List of Gemini Content objects (conversation history).
@@ -275,8 +275,8 @@ class GeminiProvider(AIProvider):
             The raw Gemini GenerateContentResponse.
 
         Raises:
-            RuntimeError: If rate limiting persists after all retries.
-            ClientError:  For non-429 API errors.
+            RuntimeError: If rate limiting or transient errors persist after all retries.
+            APIError:     For other non-transient API errors.
         """
         # Use generate_content (stateless) to stay compatible with our own
         # multi-turn loop managed by agent.py
@@ -287,14 +287,28 @@ class GeminiProvider(AIProvider):
                     contents=contents,
                     config=config,
                 )
-            except genai_errors.ClientError as exc:
-                if "429" not in str(exc) and "RESOURCE_EXHAUSTED" not in str(exc):
+            except genai_errors.APIError as exc:
+                code = getattr(exc, "code", None)
+                status = getattr(exc, "status", None)
+                err_msg = str(exc)
+
+                is_rate_limit = (code == 429 or status == "RESOURCE_EXHAUSTED" or "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg)
+                is_transient_server = (code in (500, 503, 504) or status in ("UNAVAILABLE", "INTERNAL") or "503" in err_msg or "UNAVAILABLE" in err_msg or "500" in err_msg)
+
+                if not (is_rate_limit or is_transient_server):
                     raise
-                wait = min(_extract_retry_delay(exc) + 1.0, 60.0)
-                logger.warning("Gemini rate-limit hit. Retrying in %.1fs (attempt %d/%d).", wait, attempt + 1, _MAX_RETRIES)
+
+                if is_rate_limit:
+                    wait = min(_extract_retry_delay(exc) + 1.0, 60.0)
+                    logger.warning("Gemini rate-limit hit. Retrying in %.1fs (attempt %d/%d). Error: %s", wait, attempt + 1, _MAX_RETRIES, exc)
+                else:
+                    # Exponential backoff for 503/transient errors (e.g. 2.0s, 3.0s, 5.0s, 9.0s...)
+                    wait = float(2 ** attempt) + 1.0
+                    logger.warning("Gemini transient server error (%s). Retrying in %.1fs (attempt %d/%d). Error: %s", status or code, wait, attempt + 1, _MAX_RETRIES, exc)
+
                 time.sleep(wait)
 
-        raise RuntimeError(f"Gemini API rate limit persisted after {_MAX_RETRIES} retries.")
+        raise RuntimeError(f"Gemini API rate limit or transient error persisted after {_MAX_RETRIES} retries.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -321,13 +335,35 @@ def _to_gemini_contents(messages: list[dict]) -> list:
         'assistant' — mapped to Gemini role='model' with text + function_call Parts.
         'tool'      — mapped to Gemini role='user' with function_response Part.
     """
+    import base64
     contents = []
     for msg in messages:
         role = msg["role"]
         content = msg.get("content", "")
 
         if role == "user":
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=content)]))
+            parts = []
+            if content:
+                parts.append(types.Part.from_text(text=content))
+            for img in msg.get("images", []):
+                if isinstance(img, str) and img.startswith("data:"):
+                    try:
+                        header, base64_data = img.split(",", 1)
+                        mime_type = header.split(";")[0].split(":")[1]
+                        raw_bytes = base64.b64decode(base64_data)
+                        parts.append(types.Part.from_bytes(data=raw_bytes, mime_type=mime_type))
+                    except Exception as e:
+                        logger.error("Failed to parse base64 image: %s", e)
+            contents.append(types.Content(role="user", parts=parts))
+
+        elif role == "system":
+            if content:
+                contents.append(
+                    types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=f"[System Note]\n{content}")],
+                    )
+                )
 
         elif role == "assistant":
             parts = []

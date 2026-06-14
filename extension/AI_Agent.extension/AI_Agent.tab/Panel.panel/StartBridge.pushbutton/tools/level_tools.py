@@ -282,6 +282,13 @@ class LevelTools(object):
                 return {"status": "error", "message": "Level name '{}' already exists.".format(name)}
 
         with Transaction(self.doc, "Agent - Create Level") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 new_level = Level.Create(self.doc, elevation)
@@ -300,7 +307,8 @@ class LevelTools(object):
                         self.apply_level_extents_to_views(self.doc, new_level, min_x, min_y, max_x, max_y)
 
                 new_level.Pinned = True
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Level '{}' successfully created.".format(name)),
@@ -308,7 +316,8 @@ class LevelTools(object):
                     ("data", OrderedDict([("element_id", new_level.UniqueId)]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to create level: " + str(ex)}
 
     def modify(self, level_id, name=None, elevation=None, min_x=None, min_y=None, max_x=None, max_y=None, reference_level_id=None, maximize_extents=None):
@@ -336,6 +345,13 @@ class LevelTools(object):
             return {"status": "error", "message": "Level element not found."}
 
         with Transaction(self.doc, "Agent - Modify Level") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 was_pinned = level.Pinned
@@ -375,7 +391,8 @@ class LevelTools(object):
                         self.apply_level_extents_to_views(self.doc, level, new_min_x, new_min_y, new_max_x, new_max_y)
 
                 level.Pinned = was_pinned
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Level '{}' successfully modified.".format(level.Name)),
@@ -383,7 +400,8 @@ class LevelTools(object):
                     ("data", OrderedDict([("element_id", level.UniqueId)]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to modify level: " + str(ex)}
 
     def delete(self, level_id, ui_app=None):
@@ -453,16 +471,25 @@ class LevelTools(object):
                     return {"status": "error", "message": "Cannot delete level because it is associated with the active view, and no other safe view was found to switch to."}
 
         with Transaction(self.doc, "Agent - Delete Level") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 level.Pinned = False
                 self.doc.Delete(level.Id)
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Level and its associated views successfully deleted."),
                     ("measurement_unit", "feet")
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to delete level: " + str(ex)}

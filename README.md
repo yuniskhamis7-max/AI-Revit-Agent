@@ -1,11 +1,95 @@
 # Autodesk Revit AI Agent: Developer & User Manual
 
 > [!IMPORTANT]
-> 🤖 **FOR AI CODING AGENTS (Auto-Discovery & Testing Guidelines)**:
-> If you are an AI coding assistant (e.g., Cursor, Copilot, Antigravity, etc.) developing or testing tools on this codebase:
-> - **DO NOT** write custom, one-off test scripts to simulate HTTP POST payloads to the Revit bridge.
-> - **DO NOT** manually ask the user to click buttons or execute commands inside the Revit UI for basic backend testing.
-> - **ALWAYS** use the dedicated CLI utility [run_tool.py](file:///d:/Construction/Projects/ai_revit_agent/run_tool.py) located in the project root to inspect, execute, chain, and batch-test all Revit bridge tools. It is the authoritative, standardized verification tool for this repository.
+> ## 🤖 AI Coding Agent Guidelines
+>
+> If you are an AI coding assistant (e.g., Cursor, Copilot, Antigravity, etc.) contributing to this codebase, you **MUST** read and follow all rules below before writing or modifying any code. These are not suggestions — they are the architectural standards this project enforces.
+>
+> ---
+>
+> ### Rule 0 — Tooling & Verification
+> - **ALWAYS** use the dedicated CLI utility [run_tool.py](file:///d:/Construction/Projects/ai_revit_agent/run_tool.py) to inspect, execute, chain, and batch-test all Revit bridge tools. It is the authoritative, standardized verification tool for this repository.
+>
+> ---
+>
+> ### Rule 1 — Generic, Dynamic, Scalable by Default
+> - **NEVER hardcode element categories, tool names, or capability-specific logic into orchestration or pipeline code.** The system is designed to scale to hundreds of tools without requiring code changes.
+> - Use runtime schema inspection to infer behavior (e.g., derive `fetch_*` targets from `create_*` tool names found in the batch result; filter schemas by prefix at runtime).
+> - Any logic that names a specific Revit element category (grids, columns, walls, beams, etc.) inside the Python orchestration layer is a code smell. The LLM + tool schema system should handle category-awareness dynamically.
+> - Examples of what is **NOT allowed**:
+>   ```python
+>   # ❌ WRONG — hardcoded categories
+>   if tool == "create_grid":
+>       created_grid_ids.add(eid)
+>   elif tool == "create_structural_column":
+>       created_column_ids.add(eid)
+>   ```
+>   ```python
+>   # ✅ CORRECT — generic, data-driven
+>   fetch_only_schemas = [s for s in self.tool_schemas if s.get("name", "").startswith("fetch_")]
+>   ```
+>
+> ---
+>
+> ### Rule 2 — Clean Architecture, No Quick Fixes
+> > **"The best code is the decoupled code that is agnostic of the logic of other layers."**
+> - Implement every solution cleanly and maintainably. Do not introduce workarounds, monkeypatches, or "temporary" hacks that compromise the architecture.
+> - Separation of concerns is mandatory: agents know only their own domain; the orchestrator only coordinates; helpers only compute; prompts only instruct.
+> - No agent class should import FastAPI, aiosqlite, or SSE-related modules. No database class should contain agent logic.
+> - Prefer extending the existing abstraction hierarchy over duplicating logic (e.g., add a `system_prompt` parameter to `AgentOrchestrator` rather than injecting it as a fake system message).
+>
+> ---
+>
+> ### Rule 3 — Validation Integrity (No Closed-Loop Validation)
+> - **NEVER validate output by comparing LLM-generated text against LLM-generated text derived from the same source.** This produces guaranteed false positives.
+> - The validation pipeline must be grounded in real Revit state:
+>   - After `execute_batch`, fetch the actual created elements using `fetch_*` tools.
+>   - Feed that real fetched data into the reverse parser to produce the Result Design Manual.
+>   - Only then pass the Input DM and Result DM to the validator.
+> - The `BIMValidatorAgent` is the authority on PASS/FAIL. Its verdict must be based on real data.
+> - The reverse parser (`parser_reverse.txt`) is a **tool-calling agent** — it must autonomously call the appropriate `fetch_*` tools and build the Result DM from real values. It must **never** copy coordinates or parameters from the batch request input.
+>
+> ---
+>
+> ### Rule 4 — Prompts Are the Configuration Layer
+> - All agent behaviors are defined in `.txt` prompt files under `backend/core/prompts/`. Python code must not duplicate or override these instructions inline.
+> - Prompts must be generic and tool-agnostic. Do not reference specific tool names (e.g., `fetch_grids`, `create_structural_column`) in system prompts — use abstract language that applies to all tools.
+> - When adding a new capability, update the prompt file first, then adjust the minimal Python scaffolding needed to expose it.
+>
+> ---
+>
+> ### Rule 5 — AgentOrchestrator Is Reusable
+> - `AgentOrchestrator` in [agent_loop.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/agent_loop.py) is the standard generic multi-turn tool-calling loop. Use it for **any** pipeline phase that requires an LLM to call tools autonomously.
+> - It accepts `system_prompt`, `tool_schemas`, and `max_turns` as parameters — set these appropriately per phase.
+> - Do not build custom LLM-tool-call loops outside `AgentOrchestrator`. If you need new behavior, extend `AgentOrchestrator` cleanly.
+>
+> ---
+>
+> ### Rule 6 — Dedup and Safety Nets Are Mandatory
+> - The `filter_duplicate_calls()` helper in [helpers.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/helpers.py) must always be applied in Phase 4 before dispatching the batch. It is a programmatic safety net that runs **regardless** of what the LLM emits.
+> - Do not remove or bypass it — LLM hallucinations are expected and the safety net catches them before they cause Revit transaction aborts.
+> - When adding new tool types, ensure the dedup logic is updated to cover naming/spatial conflicts for those types.
+>
+> ---
+>
+> ### Rule 7 — Phase Boundaries Must Be Respected
+> - Each phase in the COMPLEX pipeline has a strictly defined input and output. Do not let one phase's logic bleed into another's.
+> - Specifically:
+>   - Phase 4 (Forward Parser) outputs only JSON — never executes.
+>   - Phase 5 (Execution) only calls `execute_batch` — never interprets results.
+>   - Phase 6 (Reverse Parser) only calls `fetch_*` tools and produces a Result DM — never creates or deletes.
+>   - Phase 7 (Validator) only reads both DMs and produces a report — never fetches or modifies.
+>   - Phase 8 (Decision) only reads the validator verdict — never re-runs earlier phases.
+>
+> ---
+>
+> ### Rule 8 — Tool-Safety in Phase 6
+> - The reverse parser agent loop is granted **only** `fetch_*` tool schemas. Never pass write tools (`create_*`, `delete_*`, `execute_batch`) to this agent.
+> - This is enforced in the orchestrator by filtering at runtime:
+>   ```python
+>   fetch_only_schemas = [s for s in self.tool_schemas if s.get("name", "").startswith("fetch_")]
+>   ```
+> - Maintain this pattern for any other read-only agent phases you introduce.
 
 [![Revit Version](https://img.shields.io/badge/Revit-2025-blue.svg)](https://www.autodesk.com/products/revit/overview)
 [![Python Version](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
@@ -215,43 +299,148 @@ Arbitrary key-value store for app configuration and preferences.
 
 ---
 
-## 3. AI Agent Core & Generator Loop
+## 3. AI Agent Core — Multi-Agent Pipeline
+
+### Design Philosophy
+
+The AI layer is built on a **multi-agent pipeline** where each agent has a single, focused responsibility. No agent knows about HTTP, SSE, or the database — it only knows its own domain. The `BIMOrchestrator` in [multi_agent_loop.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/multi_agent_loop.py) is the sole coordinator, driving agents sequentially and yielding live SSE events at every step.
+
+All agents are defined in [agents.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/agents.py) and inherit from `BaseAgent`, which provides:
+- `generate_response()` — blocking accumulation of one LLM turn (text-only).
+- `stream_turn()` — async generator of raw provider events (tool-calling, used by `SimpleTaskAgent`).
+
+---
+
+### Agent Roster
+
+| Agent | Class | Role | Skills |
+|---|---|---|---|
+| **Orchestrator** | `BIMOrchestrator` | Routes tasks, drives all phases, emits SSE events | — |
+| **Task Classifier** | `TaskClassifier` | SIMPLE vs COMPLEX decision | — |
+| **Agent 1 — Intent Clarifier** | `BIMIntentClarifierAgent` | Iterates with the user until every parameter is confirmed | — |
+| **Agent 2 — Design Manual** | `BIMDesignManualAgent` | Converts approved intent into a complete numeric Input Design Manual | — |
+| **Agent 3 — Planner** | `BIMExecutionPlannerAgent` | Produces a strategy plan guiding the orchestrator | — |
+| **Helper — Parser** | `BIMParserAgent` | Bidirectional: Input Design Manual → JSON and result JSON → Result Design Manual | — |
+| **Agent 5 — Validator** | `BIMValidatorAgent` | Compares Result Design Manual against Input Design Manual | — |
+| **Simple Task Agent** | `SimpleTaskAgent` | Handles direct queries and single-element operations | Tool calls |
+
+---
+
+### Routing: SIMPLE vs COMPLEX
+
+Every user turn is first classified:
+
+- **SIMPLE**: A single direct action — fetching, creating, deleting, or modifying one element. Routes to `_simple_flow()`.
+- **COMPLEX**: A coordinated multi-element layout (column grids, level stacks, etc.) requiring planning and dependency ordering. Routes to `_complex_flow()`.
+
+---
+
+### SIMPLE Flow
+
+```
+Phase 0 — Pre-fetch existing model state (levels, grids, columns)
+Phase 1 — SimpleTaskAgent: tool-calling turn
+            If info is missing → asks the user; next turn continues naturally
+Phase 2 — Post-fetch verification (write ops only) → user-facing report
+```
+
+The current model state is injected as a `system` message so the agent knows what already exists and avoids creating duplicates.
+
+---
+
+### COMPLEX Flow (8 Phases)
+
+```
+Phase 0 — Pre-flight: fetch_levels + fetch_grids + fetch_structural_columns
+Phase 1 — BIMIntentClarifierAgent: iterate until "DESIGN INTENT ESTABLISHED"
+Phase 2 — BIMDesignManualAgent: produce self-contained numeric Input Design Manual
+Phase 3 — BIMExecutionPlannerAgent: produce markdown strategy plan
+Phase 4 — BIMParserAgent.manual_to_json(): Input DM → execute_batch JSON
+           filter_duplicate_calls(): deterministic dedup safety net
+Phase 5 — execute_batch → Revit (single atomic transaction)
+Phase 6 — BIMParserAgent (tool-calling agent loop, fetch_* only):
+           inspect batch result → infer fetch_* tools → call them → compile Result Design Manual
+           from real Revit data (NOT from batch request inputs)
+Phase 7 — BIMValidatorAgent: compare Result DM vs Input DM (real data vs intent)
+Phase 8 — Orchestrator decision: PASSED → success report | FAILED → issue report
+```
+
+```mermaid
+flowchart TD
+    A([User Input]) --> CL{Task Classifier}
+    CL -- SIMPLE --> SF[Simple Flow]
+    CL -- COMPLEX --> P0
+
+    SF --> SF0[Phase 0: Pre-fetch state]
+    SF0 --> SF1[SimpleTaskAgent tool-call]
+    SF1 --> SF2[Phase 2: Post-fetch verify]
+    SF2 --> Z([Response to User])
+
+    P0[Phase 0: Pre-flight fetch] --> P1
+    P1[Phase 1: Intent Clarifier] -- needs more info --> Z
+    P1 -- DESIGN INTENT ESTABLISHED --> P2
+    P2[Phase 2: Design Manual] --> P3
+    P3[Phase 3: Execution Planner] --> P4
+    P4[Phase 4: Parser forward + dedup] --> P5
+    P5[Phase 5: execute_batch to Revit] --> P6
+    P6[Phase 6: Parser reverse] --> P7
+    P7[Phase 7: Validator] --> P8
+    P8{Phase 8: Decision} -- PASSED --> Z
+    P8 -- FAILED --> Z
+```
+
+---
+
+### Input Design Manual & Result Design Manual
+
+A key design choice is using **human-readable markdown documents** as the intermediate representation between agents rather than intermediate JSON:
+
+- **Input Design Manual** (Agent 2 output): A self-contained table-based document with every element's name, coordinates, levels, types, and status (NEW vs PRE-EXISTING). The Parser converts it to `execute_batch` JSON.
+- **Result Design Manual** (Phase 6 output): Built by the reverse parser **after fetching the real Revit state** via `fetch_*` tools. Contains the actual coordinates, level names, and element IDs as stored in Revit — not echoed-back request inputs. The Validator compares it against the Input DM to detect placement mismatches.
+
+This makes every intermediate step debuggable — the agent activity panel in the frontend shows the full content of each document.
+
+---
+
+### Programmatic Dedup Safety Net
+
+In Phase 4, `_filter_duplicate_calls()` deterministically strips any `create_level` or `create_grid` calls whose names already exist in Revit — **regardless of what the LLM emits**. This runs on every complex task and prevents Revit transaction aborts caused by duplicate element names. The orchestrator also injects the existing state into every agent prompt as a secondary (LLM-level) guardrail.
+
+---
 
 ### Decoupled Architecture
 
-The AI Orchestrator in [agent_loop.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/agent_loop.py) is decoupled from the framework layers. It does not import FastAPI components, SSE builders, or database instances. Instead, it relies on two primary abstractions:
-1. **History List**: Receives conversational history as a raw list of dictionaries (`list[dict]`), conforming to standard role-content structure.
-2. **Tool Execution Callback**: Accepts an asynchronous callback function (`execute_tool_cb`) to execute tools. This keeps the agentic loop purely focused on LLM reasoning.
+The `BIMOrchestrator.run()` method accepts two dependencies injected by the chat API:
+1. **`messages: list[dict]`** — conversation history in standard role-content format.
+2. **`execute_tool_fn: Callable`** — async callback that dispatches tool calls to the Revit bridge.
+
+No agent imports FastAPI, SSE builders, or database clients. The orchestrator translates pipeline results into SSE event dicts using two factory helpers: `_thought()` and `_error()`.
 
 ---
 
 ### SSE Streaming & Event Formats
 
-The backend communicates with the React frontend through a Server-Sent Events (SSE) connection at `/api/chat`. The generator yields JSON lines with specific `event` properties:
+The backend communicates with the React frontend through a Server-Sent Events (SSE) stream at `/api/chat`. The orchestrator yields JSON dicts matching these event types:
 
 | Event Type | Purpose | Payload Schema |
 |---|---|---|
-| `agent_thought` | Synthetic thought logs or progress messages. | `{ "type": "agent_thought", "content": "..." }` |
-| `text_delta` | Incremental text responses from the AI. | `{ "type": "text_delta", "content": "..." }` |
-| `thinking_delta` | Internal chain-of-thought stream chunks from Gemini. | `{ "type": "thinking_delta", "content": "..." }` |
-| `tool_call_pending` | Details of a tool call before approval/execution. | `{ "type": "tool_call_pending", "id": "...", "tool": "...", "args": {...}, "requires_approval": false }` |
-| `tool_call_executing` | Signal that a tool is actively running in Revit. | `{ "type": "tool_call_executing", "id": "...", "tool": "..." }` |
-| `tool_result` | Result returned from Revit tool execution. | `{ "type": "tool_result", "id": "...", "tool": "...", "result": {...}, "approved": true }` |
-| `agent_paused` | Signal that the agent is paused waiting for user approval. | `{ "type": "agent_paused", "awaiting_approval_id": "...", "tool": "..." }` |
-| `error` | Exception details when execution fails. | `{ "type": "error", "message": "...", "detail": "..." }` |
+| `agent_thought` | Live pipeline status — which agent is running, what it found. | `{ "type": "agent_thought", "content": "[Agent Name] ..." }` |
+| `text_delta` | Incremental text responses (intent clarification, validation reports, final summaries). | `{ "type": "text_delta", "content": "..." }` |
+| `tool_call_pending` | Details of a tool call before execution. | `{ "type": "tool_call_pending", "id": "...", "tool": "...", "args": {...}, "requires_approval": false }` |
+| `tool_call_executing` | Signal that a tool is dispatched to Revit. | `{ "type": "tool_call_executing", "id": "...", "tool": "..." }` |
+| `tool_result` | Result returned from Revit. | `{ "type": "tool_result", "id": "...", "tool": "...", "result": {...}, "approved": true }` |
+| `error` | Exception or pipeline failure details. | `{ "type": "error", "content": "...", "detail": "..." }` |
 | `done` | Signals the end of the streaming session. | `{ "type": "done", "session_id": "...", "message_id": "..." }` |
 
 ---
 
 ### Client Disconnect Handling & State Persistence
 
-If the user closes their browser window or clicks the **Stop** button, the FastAPI request handler catches the client disconnection. 
-
-The SSE generator implements a strict `finally` block:
-* When a disconnect occurs, the generator loop is interrupted.
-* The `finally` block instantly captures all generated message deltas and completed tool execution logs.
-* It commits the partial assistant response and tool records directly to SQLite.
-* This ensures that no model credits or tool results are lost, and the chat history stays in sync.
+If the user closes their browser or clicks **Stop**, the FastAPI request handler catches the client disconnection. The SSE generator implements a strict `finally` block:
+- The generator loop is interrupted immediately.
+- The `finally` block captures all accumulated message text and completed tool execution logs.
+- It commits the partial assistant response and tool records to SQLite.
+- No model credits or tool results are lost and chat history stays in sync.
 
 ---
 
@@ -260,64 +449,80 @@ The SSE generator implements a strict `finally` block:
 ```
 ai_revit_agent/
 ├── .vscode/                        # VS Code workspace settings
-│   └── settings.json               # Configured themes, paths, and rulers
 ├── backend/                        # FastAPI Backend Application
-│   ├── api/                        # API route handlers
-│   │   ├── chat.py                 # Chat stream endpoint
-│   │   ├── providers.py            # Model configuration
-│   │   ├── sessions.py             # Session management
-│   │   └── settings.py             # App-wide configurations and status checks
-│   ├── core/                       # Core AI Orchestration
-│   │   └── agent_loop.py           # Decoupled Gemini agent loop
-│   ├── data/                       # SQLite DB Folder
+│   ├── api/                        # HTTP route handlers
+│   │   ├── chat.py                 # Chat SSE stream endpoint
+│   │   ├── providers.py            # Model & API key configuration
+│   │   ├── sessions.py             # Session CRUD
+│   │   └── settings.py             # App-wide config & Revit status
+│   ├── core/                       # Multi-Agent AI Pipeline
+│   │   ├── agents.py               # All agent class definitions
+│   │   │                           #   BaseAgent
+│   │   │                           #   BIMIntentClarifierAgent  (Agent 1)
+│   │   │                           #   BIMDesignManualAgent     (Agent 2)
+│   │   │                           #   BIMExecutionPlannerAgent (Agent 3)
+│   │   │                           #   BIMParserAgent           (Helper — bidirectional)
+│   │   │                           #   BIMValidatorAgent        (Agent 5)
+│   │   │                           #   SimpleTaskAgent
+│   │   ├── multi_agent_loop.py     # BIMOrchestrator — 8-phase pipeline driver
+│   │   │                           #   TaskClassifier
+│   │   │                           #   SIMPLE flow  (_simple_flow)
+│   │   │                           #   COMPLEX flow (_complex_flow)
+│   │   │                           #   _fetch_existing_state
+│   │   │                           #   _filter_duplicate_calls (dedup safety net)
+│   │   └── agent_loop.py           # Legacy single-agent loop (fallback)
+│   ├── data/                       # SQLite database folder
 │   │   └── agent.db                # Persistence database (gitignored)
-│   ├── infra/                      # Data Infrastructure
+│   ├── infra/                      # Data infrastructure
 │   │   └── db.py                   # Async raw SQLite client
-│   ├── providers/                  # AI Adapters
-│   │   ├── base.py                 # Provider interfaces & System Prompts
+│   ├── providers/                  # LLM provider adapters
+│   │   ├── base.py                 # Provider interface & system prompts
 │   │   └── gemini.py               # Google Gemini integration
-│   ├── schemas/                    # JSON Schema storage
-│   │   └── tools.json              # Discovered Revit tools schemas
-│   ├── services/                   # Business Logic Services
-│   │   ├── revit_bridge.py         # HTTP client interfacing with C# Bridge
-│   │   ├── streaming.py            # Event formatting utility
-│   │   └── tool_registry.py        # Tool dispatcher & schemas caching
-│   ├── config.py                   # Pydantic environment configuration
-│   ├── main.py                     # App lifespan, CORS, and launch setup
-│   └── requirements.txt            # Backend python packages
-├── frontend/                       # Vite + React Frontend Application
+│   ├── schemas/                    # JSON schema cache
+│   │   └── tools.json              # Discovered Revit tool schemas
+│   ├── services/                   # Business logic services
+│   │   ├── revit_bridge.py         # HTTP client for C# Bridge
+│   │   ├── streaming.py            # SSE event builder
+│   │   └── tool_registry.py        # Tool dispatcher & schema cache
+│   ├── config.py                   # Pydantic environment config
+│   ├── main.py                     # App lifespan, CORS, startup
+│   └── requirements.txt            # Python dependencies
+├── frontend/                       # Vite + React Frontend
 │   ├── src/
-│   │   ├── api/                    # Frontend HTTP client wrappers
-│   │   ├── components/             # Reusable UI widgets
-│   │   │   ├── ChatWindow.tsx      # SSE messages stream visualizer
-│   │   │   ├── SessionSidebar.tsx  # Sidebar list of sessions
-│   │   │   ├── SettingsPanel.tsx   # Model & API keys panel
-│   │   │   └── ToolCallCard.tsx    # Visual status card for active tools
-│   │   ├── store/                  # Zustand state engine
-│   │   ├── types/                  # TypeScript interface declarations
-│   │   ├── App.tsx                 # Root app module
-│   │   └── main.tsx                # App entrypoint
-│   ├── package.json                # Frontend package requirements
-│   └── vite.config.ts              # Vite asset bundler configuration
-├── bridge-source/                  # .NET 8.0 C# Bridge Source Code
-│   ├── BridgeServer.cs             # Thread-safe dispatch logic
-│   └── RevitAgentBridge.csproj     # C# project configuration
+│   │   ├── api/                    # HTTP client wrappers
+│   │   ├── components/
+│   │   │   ├── ChatWindow.tsx       # Message stream & input with image attach
+│   │   │   ├── MessageBubble.tsx    # Per-agent coloured activity panel
+│   │   │   ├── SessionSidebar.tsx  # Session list
+│   │   │   ├── SettingsPanel.tsx   # Model & API key settings
+│   │   │   └── ToolCallCard.tsx    # Visual tool execution card
+│   │   ├── hooks/
+│   │   │   └── useChat.ts           # SSE consumer + image payload
+│   │   ├── store/                  # Zustand state (messages, approvals, UI)
+│   │   ├── types/                  # TypeScript interfaces (SSEEvent, ChatMessage)
+│   │   ├── App.tsx                 # Root component
+│   │   └── main.tsx                # Entry point
+│   ├── package.json
+│   └── vite.config.ts
+├── bridge-source/                  # .NET 8.0 C# Bridge
+│   ├── BridgeServer.cs             # Thread-safe dispatch & HttpListener
+│   └── RevitAgentBridge.csproj
 ├── extension/                      # pyRevit Extension Bundle
 │   └── AI_Agent.extension/
 │       └── AI_Agent.tab/
 │           └── Panel.panel/
 │               └── StartBridge.pushbutton/
-│                   ├── bundle.yaml          # pyRevit UI button declaration
-│                   ├── script.py            # IronPython bridge bootstrapping
-│                   ├── tools/               # Modular Python tool definitions
-│                   │   ├── __init__.py      # Tool registry, hot-reloading & routing entrypoint
-│                   │   ├── grid_tools.py    # Grid query/modify transaction operations
-│                   │   ├── level_tools.py   # Level elevation/boundary projection operations
-│                   │   └── column_tools.py  # Structural column/type management database operations
-│                   └── RevitAgentBridge.dll # Built C# bridge assembly
-├── .cursorrules                         # AI Agent workspace context rules
+│                   ├── bundle.yaml          # pyRevit button declaration
+│                   ├── script.py            # IronPython bridge bootstrapper
+│                   ├── tools/               # Modular IronPython tool definitions
+│                   │   ├── __init__.py      # Tool registry, routing & hot-reload
+│                   │   ├── grid_tools.py    # Grid create/fetch/delete
+│                   │   ├── level_tools.py   # Level create/fetch/delete
+│                   │   └── column_tools.py  # Structural column management
+│                   └── RevitAgentBridge.dll # Compiled C# bridge assembly
 ├── run.bat                         # Windows automated startup launcher
-└── .gitignore                      # Git exclusion rules
+├── run_tool.py                     # CLI headless tool testing utility
+└── .gitignore
 ```
 
 ---
@@ -506,6 +711,18 @@ In IronPython, .NET Enums do not automatically equate to standard Python integer
 #### 3. Garbage Collection & Namespace Isolation
 When a pyRevit script finishes execution, IronPython cleans up its module-level global variables. Because the C# bridge maintains references to the registered functions in memory, **all dependencies and imports must be kept self-contained within the tool functions themselves**. Import Revit namespaces inside the tool functions rather than at the top of the file to prevent missing module references.
 
+#### 4. Handling Revit Transaction Warnings and Errors Programmatically
+To prevent Revit from showing modal dialog boxes (which block the main UI thread and freeze the C# bridge server), all database modification transactions must handle failures using a custom failures preprocessor class implementing `IFailuresPreprocessor`:
+* **Warnings**: Swallow warning-level messages silently using `failuresAccessor.DeleteWarning(failure)`.
+* **Errors**: Roll back transactions silently on error-level messages. To prevent Revit from showing the error dialog box to explain *why* the transaction was rolled back, you must set `SetClearAfterRollback(True)` before returning `ProceedWithRollBack`:
+  ```python
+  opts = failuresAccessor.GetFailureHandlingOptions()
+  opts.SetClearAfterRollback(True)
+  failuresAccessor.SetFailureHandlingOptions(opts)
+  return FailureProcessingResult.ProceedWithRollBack
+  ```
+* **Safe Rollbacks**: Always wrap `.RollBack()` calls in try-except blocks in your exception handlers (or use the `rollback_transaction(trans)` helper from `tools.utils`). If a transaction has already been rolled back by the failures preprocessor, calling `.RollBack()` again on it will throw a secondary exception, overshadowing the original failure description.
+
 ---
 
 ### Modular Registry & Submodules
@@ -594,12 +811,23 @@ To test your newly added tool or verify existing tools, run the [run_tool.py](fi
   ```bash
   python run_tool.py run fetch_levels --then create_grid name="Grid A" start_x=0.0 start_y=0.0 end_x=10.0 end_y=10.0 --then fetch_grids
   ```
+
 * **Run batch commands from a file**:
   ```bash
   python run_tool.py batch commands.txt
   # or using JSON format
   python run_tool.py batch commands.json
   ```
+
+* **Automated Diagnostic Logging & Session Transcription**:
+  The framework writes centralized runtime logs and enables easy extraction of the latest active chat sessions for rapid debugging:
+  
+  * **Centralized Logs**: All backend tracebacks, network payloads, and LLM streaming events are written to `backend/data/backend.log`.
+  * **Transcribe Latest Session**: To dump the latest chat session (including user message, detailed multi-agent thoughts, tool call inputs, C# bridge returns, and validation reports) into a clean Markdown document:
+    ```bash
+    python debug_dump.py
+    ```
+    This generates `backend/data/latest_run.md`. This allows developers and AI assistants to quickly analyze logical errors, coordinate mismatches, and tracebacks directly in the workspace.
 
 ---
 

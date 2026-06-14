@@ -13,11 +13,6 @@ class GridTools(object):
         self.doc = doc
 
     def fetch_all(self):
-        """Queries and formats all gridlines inside the active Revit document.
-        
-        Returns:
-            dict: Structured payload containing status, message, and list of grids.
-        """
         from Autodesk.Revit.DB import FilteredElementCollector, Grid, Line, Arc
         from collections import OrderedDict
         
@@ -119,6 +114,13 @@ class GridTools(object):
             top = 150.0
 
         with Transaction(self.doc, "Agent - Create Grid") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 line = Line.CreateBound(start_pt, end_pt)
@@ -137,7 +139,8 @@ class GridTools(object):
                         
                 new_grid.SetVerticalExtents(bottom, top)
                 new_grid.Pinned = True
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 
                 return OrderedDict([
                     ("status", "success"),
@@ -146,7 +149,8 @@ class GridTools(object):
                     ("data", OrderedDict([("element_id", new_grid.UniqueId)]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to create grid: " + str(ex)}
 
     def modify(self, grid_id, name=None, start_pt=None, end_pt=None, view=None):
@@ -180,6 +184,13 @@ class GridTools(object):
             top = 150.0
 
         with Transaction(self.doc, "Agent - Modify Grid") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 final_name = name if name else grid.Name
@@ -220,7 +231,8 @@ class GridTools(object):
                     if name and name != grid.Name:
                         grid.Name = str(name)
 
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Grid '{}' successfully modified.".format(final_name)),
@@ -228,7 +240,8 @@ class GridTools(object):
                     ("data", OrderedDict([("element_id", final_id)]))
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to modify grid: " + str(ex)}
 
     def delete(self, grid_id):
@@ -248,16 +261,25 @@ class GridTools(object):
             return {"status": "error", "message": "Grid element not found."}
 
         with Transaction(self.doc, "Agent - Delete Grid") as trans:
+            try:
+                from tools.utils import WarningSwallower
+                options = trans.GetFailureHandlingOptions()
+                options.SetFailuresPreprocessor(WarningSwallower())
+                trans.SetFailureHandlingOptions(options)
+            except Exception:
+                pass
             trans.Start()
             try:
                 grid.Pinned = False
                 self.doc.Delete(grid.Id)
-                trans.Commit()
+                from tools.utils import commit_transaction
+                commit_transaction(trans)
                 return OrderedDict([
                     ("status", "success"),
                     ("message", "Grid successfully deleted."),
                     ("measurement_unit", "feet")
                 ])
             except Exception as ex:
-                trans.RollBack()
+                from tools.utils import rollback_transaction
+                rollback_transaction(trans)
                 return {"status": "error", "message": "Failed to delete grid: " + str(ex)}

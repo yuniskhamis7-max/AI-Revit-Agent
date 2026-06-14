@@ -40,6 +40,7 @@ export interface ChatPayload {
   message: string;
   provider?: string;
   model?: string;
+  images?: string[];
 }
 
 /**

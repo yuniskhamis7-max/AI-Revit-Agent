@@ -72,6 +72,7 @@ export function useSessions() {
           toolCalls,
           agentThoughts,
           createdAt: new Date(m.created_at),
+          images: m.images || undefined,
         };
       });
       useMessageStore.getState().setMessages(chatMessages);

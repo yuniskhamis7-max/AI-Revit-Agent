@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     Set to False for production / demo deployments.
     """
 
+    use_multi_agent: bool = True
+    """
+    Toggle to switch between multi-agent pipeline and single-agent loop.
+    Defaults to True.
+    """
+
     # ── AI Provider Keys ─────────────────────────────────────────────────────
     gemini_api_key: str = ""
     """Google Gemini API key. Empty string means not configured via env."""

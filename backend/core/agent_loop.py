@@ -21,10 +21,17 @@ class AgentOrchestrator:
 
     Keeps references to the LLM provider, schemas, and turn limits encapsulated.
     """
-    def __init__(self, provider: AIProvider, tool_schemas: list[dict], max_turns: int = 20):
+    def __init__(
+        self,
+        provider: AIProvider,
+        tool_schemas: list[dict],
+        max_turns: int = 20,
+        system_prompt: str | None = None,
+    ):
         self.provider = provider
         self.tool_schemas = tool_schemas
         self.max_turns = max_turns
+        self._system_prompt = system_prompt if system_prompt is not None else SYSTEM_PROMPT
 
     async def run(
         self,
@@ -74,7 +81,7 @@ class AgentOrchestrator:
                 async for event in self.provider.stream_agent_turn(
                     messages=history,
                     tool_schemas=self.tool_schemas,
-                    system_prompt=SYSTEM_PROMPT,
+                    system_prompt=self._system_prompt,
                 ):
                     etype = event.get("type")
 

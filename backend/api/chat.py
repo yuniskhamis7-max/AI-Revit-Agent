@@ -18,6 +18,7 @@ from providers import get_provider
 from services.streaming import SSEEventBuilder
 from services.tool_registry import registry
 from core.agent_loop import AgentOrchestrator
+from core.multi_agent_loop import BIMOrchestrator
 from infra.db import Database
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class ChatRequest(BaseModel):
     message: str
     provider: str | None = None
     model: str | None = None
+    images: list[str] | None = None
 
     @field_validator("model", mode="before")
     @classmethod
@@ -85,10 +87,14 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
         message_id=user_msg_id,
         session_id=body.session_id,
         role="user",
-        content=body.message
+        content=body.message,
+        images=json.dumps(body.images) if body.images else None
     )
 
-    history.append({"role": "user", "content": body.message})
+    user_entry: dict = {"role": "user", "content": body.message}
+    if body.images:
+        user_entry["images"] = body.images
+    history.append(user_entry)
 
     # ── 5. Setup SSE Stream ───────────────────────────────────────────────
     message_id = str(uuid.uuid4())
@@ -113,11 +119,17 @@ async def chat(body: ChatRequest, request: Request, db: Database = Depends(get_d
         tc_map: dict[str, dict] = {}
         accumulated_thoughts: list[str] = []
 
-        orchestrator = AgentOrchestrator(
-            provider=provider,
-            tool_schemas=tool_schemas,
-            max_turns=settings.agent_max_turns
-        )
+        if settings.use_multi_agent:
+            orchestrator = BIMOrchestrator(
+                provider=provider,
+                tool_schemas=tool_schemas
+            )
+        else:
+            orchestrator = AgentOrchestrator(
+                provider=provider,
+                tool_schemas=tool_schemas,
+                max_turns=settings.agent_max_turns
+            )
 
         try:
             async for event in orchestrator.run(
@@ -315,6 +327,9 @@ def db_messages_to_history(db_messages: list[dict]) -> list[dict]:
                 if not entry.get("tool_call_id"):
                     entry["tool_call_id"] = legacy_tc.get("id", "")
                 tool_result_idx += 1
+
+        if msg.get("images"):
+            entry["images"] = msg["images"]
 
         history.append(entry)
     return history

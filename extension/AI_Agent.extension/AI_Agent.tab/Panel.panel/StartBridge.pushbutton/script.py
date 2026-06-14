@@ -37,7 +37,7 @@ if current_dir not in sys.path:
 
 # Force reload tools package and submodules to pick up any changes
 import sys
-for mod_name in ['tools', 'tools.level_tools', 'tools.grid_tools', 'tools.column_tools']:
+for mod_name in ['tools', 'tools.utils', 'tools.level_tools', 'tools.grid_tools', 'tools.column_tools']:
     if mod_name in sys.modules:
         del sys.modules[mod_name]
 
