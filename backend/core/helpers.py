@@ -17,7 +17,7 @@ async def fetch_existing_state(
     history: list[dict] | None = None,
 ) -> dict:
     """
-    Fetch the current Revit model state (levels, grids, columns) selectively
+    Fetch the current Revit model state (levels, grids, columns, column_types) selectively
     based on the categories mentioned in the user prompt history.
 
     Each fetch is independently caught — a failure in one does not abort
@@ -25,18 +25,20 @@ async def fetch_existing_state(
     lookup sets.
     """
     state: dict = {
-        "levels":      [],
-        "grids":       [],
-        "columns":     [],
-        "level_names": set(),   # lowercase for case-insensitive match
-        "grid_names":  set(),   # exact case as returned by Revit
-        "fetched":     {"levels": False, "grids": False, "columns": False}
+        "levels":       [],
+        "grids":        [],
+        "columns":      [],
+        "column_types": [],  # list of loaded column types
+        "level_names":  set(),   # lowercase for case-insensitive match
+        "grid_names":   set(),   # exact case as returned by Revit
+        "fetched":      {"levels": False, "grids": False, "columns": False, "column_types": False}
     }
 
     # Analyze keywords in history to query only related categories
     fetch_levels = False
     fetch_grids = False
     fetch_columns = False
+    fetch_column_types = False
 
     if history:
         user_texts = [
@@ -48,34 +50,41 @@ async def fetch_existing_state(
         has_column = any(w in combined_text for w in ("column", "pillar", "post", "structural"))
         has_grid = any(w in combined_text for w in ("grid", "axis", "gridline", "spacing", "wall", "partition", "floor", "slab", "ceiling", "roof"))
         has_level = any(w in combined_text for w in ("level", "elevation", "height", "storey", "datum", "room", "space", "area"))
+        has_clear_all = any(w in combined_text for w in ("delete", "clear", "remove", "clean", "reset", "empty", "all elements"))
 
-        if has_column:
+        if has_clear_all or has_column:
             fetch_levels = True
             fetch_grids = True
             fetch_columns = True
+            fetch_column_types = True
         elif has_grid:
             fetch_levels = True
             fetch_grids = True
             fetch_columns = False
+            fetch_column_types = False
         elif has_level:
             fetch_levels = True
             fetch_grids = False
             fetch_columns = False
+            fetch_column_types = False
         else:
             # Fallback: fetch datums if ambiguous
             fetch_levels = True
             fetch_grids = True
             fetch_columns = False
+            fetch_column_types = False
     else:
         # Fallback if no history is provided (fetch datums)
         fetch_levels = True
         fetch_grids = True
         fetch_columns = False
+        fetch_column_types = False
 
     state["fetched"] = {
         "levels": fetch_levels,
         "grids": fetch_grids,
-        "columns": fetch_columns
+        "columns": fetch_columns,
+        "column_types": fetch_column_types
     }
 
     if fetch_levels:
@@ -103,6 +112,13 @@ async def fetch_existing_state(
         except Exception as exc:
             logger.warning("fetch_structural_columns failed (non-fatal): %s", exc)
 
+    if fetch_column_types:
+        try:
+            res = await execute_tool_fn("fetch_structural_column_types", {})
+            state["column_types"] = res.get("data", {}).get("column_types", [])
+        except Exception as exc:
+            logger.warning("fetch_structural_column_types failed (non-fatal): %s", exc)
+
     return state
 
 
@@ -112,7 +128,7 @@ def format_state_summary(state: dict) -> str:
     summary string suitable for injecting into agent prompts.
     """
     lines: list[str] = []
-    fetched = state.get("fetched", {"levels": True, "grids": True, "columns": True})
+    fetched = state.get("fetched", {"levels": True, "grids": True, "columns": True, "column_types": False})
 
     if fetched.get("levels"):
         if state["levels"]:
@@ -144,6 +160,18 @@ def format_state_summary(state: dict) -> str:
     else:
         lines.append("Structural Columns: (Not fetched for this task)")
 
+    if fetched.get("column_types"):
+        if state.get("column_types"):
+            types_str = ", ".join(
+                f"'{t['name']}' (Family: '{t['family_name']}', ID: '{t['column_type_id']}')"
+                for t in state["column_types"]
+            )
+            lines.append(f"Structural Column Types ({len(state['column_types'])}): {types_str}")
+        else:
+            lines.append("Structural Column Types: None")
+    else:
+        lines.append("Structural Column Types: (Not fetched for this task)")
+
     return "\n".join(lines)
 
 
@@ -157,7 +185,7 @@ def inject_state_context(
     of what already exists in Revit.
     """
     context_parts: list[str] = []
-    fetched = existing_state.get("fetched", {"levels": True, "grids": True, "columns": True})
+    fetched = existing_state.get("fetched", {"levels": True, "grids": True, "columns": True, "column_types": False})
 
     if fetched.get("levels") and existing_state["levels"]:
         lvl_str = ", ".join(
@@ -191,6 +219,14 @@ def inject_state_context(
             col_str += f" (and {len(existing_state['columns']) - 150} more columns)"
         context_parts.append(f"Existing columns: {col_str}")
 
+    if fetched.get("column_types") and existing_state.get("column_types"):
+        type_lines = [
+            f"Type '{t['name']}' (Family: '{t['family_name']}', ID: '{t['column_type_id']}')"
+            for t in existing_state["column_types"]
+        ]
+        type_str = ", ".join(type_lines)
+        context_parts.append(f"Existing structural column types: {type_str}")
+
     if not context_parts:
         return list(history)
 
@@ -213,13 +249,13 @@ def filter_duplicate_calls(
     Programmatic safety net — deterministically filters two classes of
     problematic calls before they reach the atomic execute_batch transaction:
 
-    1. **Duplicate creates** — removes create_level / create_grid calls for
+    1. **Duplicate creates** — removes create_level / create_grid / duplicate_structural_column_type calls for
        elements that already exist in Revit (prevents name-conflict aborts).
 
     2. **Phantom deletes** — removes delete_level / delete_grid /
-       delete_structural_column calls whose target ID is NOT present in the
-       fetched model state (prevents "element not found" aborts caused by
-       stale or LLM-hallucinated IDs).
+       delete_structural_column / delete_structural_column_type calls whose
+       target ID is NOT present in the fetched model state (prevents "element not found"
+       aborts caused by stale or LLM-hallucinated IDs).
 
     This runs regardless of what the LLM agents produced, ensuring a bad
     LLM day cannot cause a Revit transaction abort.
@@ -230,12 +266,17 @@ def filter_duplicate_calls(
     filtered:              list[dict] = []
     skipped_levels:        list[str]  = []
     skipped_grids:         list[str]  = []
+    skipped_column_types:  list[str]  = []
     conflicting_levels:    list[str]  = []
     phantom_deletes:       list[str]  = []
 
     existing_levels      = existing_state.get("levels", [])
     existing_level_names = existing_state.get("level_names", set())
     existing_grid_names  = existing_state.get("grid_names",  set())
+    existing_column_types = existing_state.get("column_types", [])
+    existing_column_type_names = {
+        t["name"].strip().lower() for t in existing_column_types if "name" in t
+    }
 
     # Build fast ID lookup sets from the fetched state.
     # These are used to validate delete calls before they reach the batch.
@@ -248,15 +289,69 @@ def filter_duplicate_calls(
     existing_column_ids: set[str] = {
         c["column_id"] for c in existing_state.get("columns", []) if "column_id" in c
     }
+    existing_column_type_ids: set[str] = {
+        t["column_type_id"] for t in existing_column_types if "column_type_id" in t
+    }
 
     # Map each delete tool to its ID field name and the known-ID set.
     # If the known-ID set is empty (category was not fetched), we pass the
     # call through unchanged — we can only guard what we have fetched.
     _delete_id_map: dict[str, tuple[str, set[str]]] = {
-        "delete_level":             ("level_id",  existing_level_ids),
-        "delete_grid":              ("grid_id",   existing_grid_ids),
-        "delete_structural_column": ("column_id", existing_column_ids),
+        "delete_level":                  ("level_id",  existing_level_ids),
+        "delete_grid":                   ("grid_id",   existing_grid_ids),
+        "delete_structural_column":      ("column_id", existing_column_ids),
+        "delete_structural_column_type": ("column_type_id", existing_column_type_ids),
     }
+
+    # ── Pre-scan: collect element IDs and names being deleted in this batch ───
+    # When an element is being deleted AND re-created with the same name, the
+    # duplicate-create guard must NOT skip the creation — the element will no
+    # longer exist after the deletion within the same atomic transaction.
+    batch_deleting_grid_ids: set[str] = set()
+    batch_deleting_level_ids: set[str] = set()
+    batch_deleting_column_type_ids: set[str] = set()
+    batch_deleting_grid_names: set[str] = set()
+    batch_deleting_level_names: set[str] = set()
+    batch_deleting_column_type_names: set[str] = set()
+
+    # Build ID→name lookup from existing state
+    _grid_id_to_name: dict[str, str] = {
+        g["grid_id"]: g["name"].strip()
+        for g in existing_state.get("grids", []) if "grid_id" in g and "name" in g
+    }
+    _level_id_to_name: dict[str, str] = {
+        l["level_id"]: l["name"].strip()
+        for l in existing_levels if "level_id" in l and "name" in l
+    }
+    _column_type_id_to_name: dict[str, str] = {
+        t["column_type_id"]: t["name"].strip()
+        for t in existing_column_types if "column_type_id" in t and "name" in t
+    }
+
+    for call in batch_data.get("calls", []):
+        tool = call.get("tool", "")
+        inp = call.get("input", {})
+        if tool == "delete_grid":
+            gid = inp.get("grid_id", "").strip()
+            if gid:
+                batch_deleting_grid_ids.add(gid)
+                name = _grid_id_to_name.get(gid)
+                if name:
+                    batch_deleting_grid_names.add(name)
+        elif tool == "delete_level":
+            lid = inp.get("level_id", "").strip()
+            if lid:
+                batch_deleting_level_ids.add(lid)
+                name = _level_id_to_name.get(lid)
+                if name:
+                    batch_deleting_level_names.add(name.lower())
+        elif tool == "delete_structural_column_type":
+            ctid = inp.get("column_type_id", "").strip()
+            if ctid:
+                batch_deleting_column_type_ids.add(ctid)
+                name = _column_type_id_to_name.get(ctid)
+                if name:
+                    batch_deleting_column_type_names.add(name.lower())
 
     for call in batch_data.get("calls", []):
         tool = call.get("tool", "")
@@ -280,11 +375,14 @@ def filter_duplicate_calls(
                 continue  # drop this call — it would abort the batch
 
         # ── Duplicate-create guard ────────────────────────────────────────────
+        # Skip the guard when the element is being deleted in the same batch
+        # (delete-then-recreate pattern).  The element will no longer exist
+        # after the deletion within the atomic transaction.
         elif tool == "create_level":
             name  = inp.get("name", "").strip()
             lower = name.lower()
 
-            if lower in existing_level_names:
+            if lower in existing_level_names and lower not in batch_deleting_level_names:
                 existing_lvl = next(
                     (l for l in existing_levels
                      if l["name"].strip().lower() == lower), None
@@ -305,9 +403,16 @@ def filter_duplicate_calls(
 
         elif tool == "create_grid":
             name = inp.get("name", "").strip()
-            if name in existing_grid_names:
+            if name in existing_grid_names and name not in batch_deleting_grid_names:
                 skipped_grids.append(name)
                 continue  # skip — grid already exists
+
+        elif tool == "duplicate_structural_column_type":
+            new_name = inp.get("new_type_name", "").strip()
+            lower = new_name.lower()
+            if lower in existing_column_type_names and lower not in batch_deleting_column_type_names:
+                skipped_column_types.append(new_name)
+                continue  # skip — column type already exists
 
         filtered.append(call)
 
@@ -321,6 +426,10 @@ def filter_duplicate_calls(
     if skipped_grids:
         report_lines.append(
             f"  Skipped existing grid(s) — reusing: {', '.join(skipped_grids)}"
+        )
+    if skipped_column_types:
+        report_lines.append(
+            f"  Skipped duplicating existing column type(s) — reusing: {', '.join(skipped_column_types)}"
         )
     if conflicting_levels:
         report_lines.extend(conflicting_levels)

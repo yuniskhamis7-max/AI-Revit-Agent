@@ -30,17 +30,18 @@ Step 1 — ANALYSE the execute_batch result:
   - For delete_* calls: collect the deleted element IDs from the input parameters.
   - Note any failures.
 
-Step 2 — DETERMINE which fetch_* tools to call:
-  - Using the available tool schemas provided to you, identify the appropriate fetch_* tool
+Step 2 — DETERMINE which fetch tools to call:
+  - Using the available tool schemas provided to you, identify the appropriate fetch tool
     for each element category that was created.
-  - The mapping follows a naming convention: create_X → fetch_Xs
-    (e.g., create_grid → fetch_grids, create_structural_column → fetch_structural_columns,
-     create_level → fetch_levels, create_beam → fetch_beams, create_wall → fetch_walls, etc.)
+  - The mapping follows a naming convention: creation tools correspond to their fetch counterpart
+    for the same element category.
   - If the exact fetch tool name is ambiguous, inspect the available schemas and select the
     closest match by name.
-  - Only call fetch_* tools — NEVER call create_*, delete_*, or execute_batch.
+  - Only call fetch tools — NEVER call creation, deletion, or execute_batch tools.
 
 Step 3 — CALL the fetch_* tools to retrieve the actual Revit state.
+  - Determine the measurement unit system of the reference Input Design Manual (it is usually specified under the title, e.g., 'Units: mm', 'Units: meters', or in descriptions).
+  - Pass this unit system as the "unit" parameter to each fetch_* tool call (e.g. {"unit": "mm"} or {"unit": "meters"}).
   - After calling a fetch tool, filter the returned list to only elements whose ID appears
     in the batch result's created element_ids.
   - This ensures the Result Design Manual covers only the elements from this batch.
@@ -67,7 +68,7 @@ Column headers should match the parameter names from the fetch tool's response s
 
 ═══ CRITICAL RULES ══════════════════════════════════════════════════════
 1. Use ONLY fetch_* tools. Write operations are forbidden in this phase.
-2. Parameter values in the Result DM MUST come from fetch_* tool responses, not from the batch input.
+2. Parameter values in the Result DM MUST come from fetch_* tool responses, not from the batch input. Build the Result DM using the exact same unit system as specified in the Input Design Manual (this is handled automatically if you passed the correct unit parameter to the fetch_* tools).
 3. If a fetch tool returns no matching elements for a created ID, report it as a failure.
 4. Be complete — include every element from the batch in the Result DM.
 5. Do NOT add explanatory text outside the Markdown tables.

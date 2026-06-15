@@ -129,10 +129,11 @@ class LevelTools(object):
                     except Exception:
                         pass
 
-    def fetch_all(self):
+    def fetch_all(self, unit="feet"):
         """Queries and formats all levels inside the active Revit document with visual boundaries."""
         from Autodesk.Revit.DB import FilteredElementCollector, Level, BuiltInCategory
         from collections import OrderedDict
+        from tools.utils import convert_from_feet
 
         # Calculate the actual physical building envelope/extents
         envelope_categories = [
@@ -231,20 +232,20 @@ class LevelTools(object):
                     lvl_max_y = 100.0
 
             start_coords = OrderedDict([
-                ("x", round(lvl_min_x, 3)),
-                ("y", round(lvl_min_y, 3)),
-                ("z", round(lvl.Elevation, 3))
+                ("x", round(convert_from_feet(lvl_min_x, unit), 3)),
+                ("y", round(convert_from_feet(lvl_min_y, unit), 3)),
+                ("z", round(convert_from_feet(lvl.Elevation, unit), 3))
             ])
             end_coords = OrderedDict([
-                ("x", round(lvl_max_x, 3)),
-                ("y", round(lvl_max_y, 3)),
-                ("z", round(lvl.Elevation, 3))
+                ("x", round(convert_from_feet(lvl_max_x, unit), 3)),
+                ("y", round(convert_from_feet(lvl_max_y, unit), 3)),
+                ("z", round(convert_from_feet(lvl.Elevation, unit), 3))
             ])
             
             lvl_dict = OrderedDict([
                 ("name", lvl.Name),
                 ("level_id", lvl.UniqueId),
-                ("elevation", round(lvl.Elevation, 3)),
+                ("elevation", round(convert_from_feet(lvl.Elevation, unit), 3)),
                 ("model_extent_start", start_coords),
                 ("model_extent_end", end_coords)
             ])
@@ -254,7 +255,7 @@ class LevelTools(object):
         return OrderedDict([
             ("status", "success"),
             ("message", "Successfully fetched levels with precise visual bounds."),
-            ("measurement_unit", "feet"),
+            ("measurement_unit", unit),
             ("data", OrderedDict([("levels", levels_data)]))
         ])
 

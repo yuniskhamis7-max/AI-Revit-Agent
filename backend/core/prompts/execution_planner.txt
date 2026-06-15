@@ -18,12 +18,13 @@ You operate STRICTLY in Phase 3. Do NOT attempt to perform the responsibilities 
 Analyse the Input Design Manual and produce a concise, structured Execution Plan that guides the orchestrator through creating elements in Revit safely and in the correct dependency order.
 
 ═══ DYNAMIC DEPENDENCY ORDERING (Generic BIM Layers) ════════════════════
-Schedule the Revit operations based on these logical dependency layers:
-  1. Datums Layer (Levels): Levels establish the vertical datum planes and must always be created first.
-  2. Reference Layer (Grids, Reference Lines): Grid lines establish the horizontal layout grid and must be created next.
-  3. Host Layer (Walls, Columns, Slabs, Rafts, Beams): Structural hosts depend on levels/grids and must be created third.
-  4. Component Layer (Doors, Windows, Rooms, Openings): Nested elements that depend on host geometry boundaries must be created last.
-  5. Deletion/Cleanup: Any element marked for deletion (e.g. "TO_DELETE") should be scheduled at the very beginning of the plan (Step 1) to avoid grid/column name collisions.
+Schedule the Revit operations in this logical dependency order:
+  1. Deletion/Cleanup: Any element marked for deletion (e.g. "TO_DELETE") should be scheduled FIRST to avoid name collisions with subsequent creates.
+  2. Datums Layer (Levels): Levels establish vertical datum planes and must be created next.
+  3. Reference Layer (Grids, Reference Lines): Grid lines establish the horizontal layout and must be created after levels.
+  4. Type Creation (Family Types): New element types (e.g., a new column type with custom dimensions) MUST be created BEFORE any instances of that type are placed. Without the type in Revit, instance placement will fail.
+  5. Host Layer (Walls, Columns, Slabs, Rafts, Beams): Structural hosts depend on levels, grids, and types — must be created after all of the above.
+  6. Component Layer (Doors, Windows, Rooms, Openings): Nested elements that depend on host geometry boundaries must be created last.
 
 ═══ PLAN OUTPUT FORMAT ══════════════════════════════════════════════════
 Produce a markdown document with these exact sections:

@@ -90,6 +90,58 @@ class ColumnTools(object):
         except Exception:
             return False
 
+    def _find_parameter(self, element, param_name):
+        """Finds a parameter on an element (or FamilySymbol) supporting case-insensitive lookup and aliases."""
+        if not element or not param_name:
+            return None
+
+        # 1. Direct match (case-sensitive)
+        param = element.LookupParameter(param_name)
+        if param:
+            return param
+
+        # 2. Case-insensitive match on element's parameter set
+        param_name_lower = param_name.lower()
+        try:
+            for p in element.Parameters:
+                if p.Definition.Name.lower() == param_name_lower:
+                    return p
+        except Exception:
+            pass
+
+        # 3. Alias mapping match
+        aliases_map = {
+            "width": ["b", "w", "width", "width (b)"],
+            "depth": ["h", "d", "depth", "depth (d)", "height", "height (h)"],
+            "height": ["h", "height", "height (h)", "depth", "depth (d)"],
+            "thickness": ["t", "thickness", "thickness (t)"],
+            "diameter": ["d", "diameter", "diameter (d)", "r", "radius"],
+            "radius": ["r", "radius", "radius (r)"],
+            "b": ["width", "w", "b"],
+            "h": ["depth", "height", "h"],
+            "w": ["width", "w", "b"],
+            "t": ["thickness", "t"],
+            "d": ["diameter", "depth", "d"],
+            "r": ["radius", "r"]
+        }
+
+        aliases = aliases_map.get(param_name_lower)
+        if aliases:
+            for alias in aliases:
+                # Try exact alias
+                param = element.LookupParameter(alias)
+                if param:
+                    return param
+                # Try case-insensitive alias
+                try:
+                    for p in element.Parameters:
+                        if p.Definition.Name.lower() == alias.lower():
+                            return p
+                except Exception:
+                    pass
+
+        return None
+
     def _get_level(self, level_id_or_name):
         """Helper to resolve a Level by UniqueId or Name.
         
@@ -147,7 +199,7 @@ class ColumnTools(object):
             
         return base_param, top_param, base_offset_param, top_offset_param
 
-    def fetch_all(self):
+    def fetch_all(self, unit="feet"):
         """Queries and formats all structural columns inside the active document.
         
         Returns:
@@ -157,6 +209,7 @@ class ColumnTools(object):
         try:
             from Autodesk.Revit.DB import FilteredElementCollector, FamilyInstance, BuiltInCategory, LocationPoint
             from collections import OrderedDict
+            from tools.utils import convert_from_feet
             import math
             
             collector = FilteredElementCollector(self.doc).OfCategory(BuiltInCategory.OST_StructuralColumns).OfClass(FamilyInstance).WhereElementIsNotElementType().ToElements()
@@ -169,7 +222,9 @@ class ColumnTools(object):
                 
                 if isinstance(loc, LocationPoint):
                     pt = loc.Point
-                    x, y, z = round(pt.X, 3), round(pt.Y, 3), round(pt.Z, 3)
+                    x = round(convert_from_feet(pt.X, unit), 3)
+                    y = round(convert_from_feet(pt.Y, unit), 3)
+                    z = round(convert_from_feet(pt.Z, unit), 3)
                     rotation = round(math.degrees(loc.Rotation), 3)
                     
                 base_param, top_param, base_offset_param, top_offset_param = self._get_column_level_parameters(c)
@@ -192,11 +247,11 @@ class ColumnTools(object):
                         
                 base_offset = 0.0
                 if base_offset_param and base_offset_param.HasValue:
-                    base_offset = round(base_offset_param.AsDouble(), 3)
+                    base_offset = round(convert_from_feet(base_offset_param.AsDouble(), unit), 3)
                     
                 top_offset = 0.0
                 if top_offset_param and top_offset_param.HasValue:
-                    top_offset = round(top_offset_param.AsDouble(), 3)
+                    top_offset = round(convert_from_feet(top_offset_param.AsDouble(), unit), 3)
                     
                 col_dict = OrderedDict([
                     ("column_id", c.UniqueId),
@@ -217,7 +272,7 @@ class ColumnTools(object):
             return OrderedDict([
                 ("status", "success"),
                 ("message", "Successfully fetched all project structural columns."),
-                ("measurement_unit", "feet"),
+                ("measurement_unit", unit),
                 ("rotation_unit", "degrees"),
                 ("data", OrderedDict([("columns", columns_data)]))
             ])
@@ -558,7 +613,7 @@ class ColumnTools(object):
                 failed = []
                 if dimensions:
                     for param_name, val in dimensions.items():
-                        param = new_symbol.LookupParameter(param_name)
+                        param = self._find_parameter(new_symbol, param_name)
                         if param:
                             if self._set_parameter_value(param, val):
                                 updated.append(param_name)
@@ -621,7 +676,7 @@ class ColumnTools(object):
                 updated = []
                 failed = []
                 for param_name, val in dimensions.items():
-                    param = symbol.LookupParameter(param_name)
+                    param = self._find_parameter(symbol, param_name)
                     if param:
                         if self._set_parameter_value(param, val):
                             updated.append(param_name)

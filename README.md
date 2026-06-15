@@ -90,6 +90,13 @@
 >   fetch_only_schemas = [s for s in self.tool_schemas if s.get("name", "").startswith("fetch_")]
 >   ```
 > - Maintain this pattern for any other read-only agent phases you introduce.
+>
+> ---
+>
+> ### Rule 9 — Deterministic Unit Conversion
+> - **NEVER perform arithmetic unit conversions inside the LLM or prompt instructions.**
+> - All unit conversions must be handled **deterministically** via code (e.g. Python helpers, client-side scripts, or utility classes) rather than relying on LLM text generation or hand-wavy conversions.
+>
 
 [![Revit Version](https://img.shields.io/badge/Revit-2025-blue.svg)](https://www.autodesk.com/products/revit/overview)
 [![Python Version](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
@@ -665,8 +672,11 @@ Reversing this order will trigger Revit exceptions.
 
 ### Measurement & Rotation Unit Rules
 
-All physical dimensions, coordinates, elevations, offsets, spacing, and lengths are represented and processed in decimal **feet** (the standard internal unit of the Autodesk Revit API). Rotation angles are specified in **degrees**.
-* **Schemas**: Every tool schema includes explicit `measurement_unit` (default: `"feet"`) and `rotation_unit` parameters which are fed directly to the LLM (Gemini) tool definitions.
+All physical dimensions, coordinates, elevations, offsets, spacing, and lengths are **processed** in decimal **feet** (the standard internal unit of the Autodesk Revit API). Rotation angles are specified in **degrees**.
+
+* **Deterministic Server-Side Conversion**: Unit conversion is handled entirely by the IronPython tool layer (`convert_to_feet()` in `tools/utils.py`). Each write tool accepts an optional `unit` parameter (defaulting to `"feet"`) and converts all measurement inputs to feet before reaching the Revit API. The LLM **never** performs arithmetic unit conversion.
+* **Agent Pipeline**: Agents capture, organize, and pass through measurements in the user's original units. The Forward Parser (Phase 4) includes the `unit` parameter in every tool call so the server knows which conversion factor to apply.
+* **Schemas**: Every tool schema includes explicit `measurement_unit` (default: `"feet"`) and `rotation_unit` metadata fields.
 * **Results**: Every tool execution and fetch function result includes explicit `"measurement_unit": "feet"` (and `"rotation_unit": "degrees"` where applicable) fields in its response payload.
 
 ---

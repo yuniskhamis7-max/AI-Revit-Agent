@@ -12,9 +12,10 @@ class GridTools(object):
         """
         self.doc = doc
 
-    def fetch_all(self):
+    def fetch_all(self, unit="feet"):
         from Autodesk.Revit.DB import FilteredElementCollector, Grid, Line, Arc
         from collections import OrderedDict
+        from tools.utils import convert_from_feet
         
         grids = FilteredElementCollector(self.doc).OfClass(Grid).WhereElementIsNotElementType().ToElements()
         grids_data = []
@@ -41,28 +42,28 @@ class GridTools(object):
             start_coords = None
             if start_pt:
                 start_coords = OrderedDict([
-                    ("x", round(start_pt.X, 3)),
-                    ("y", round(start_pt.Y, 3)),
-                    ("z", round(start_pt.Z, 3))
+                    ("x", round(convert_from_feet(start_pt.X, unit), 3)),
+                    ("y", round(convert_from_feet(start_pt.Y, unit), 3)),
+                    ("z", round(convert_from_feet(start_pt.Z, unit), 3))
                 ])
 
             # Format end coordinates
             end_coords = None
             if end_pt:
                 end_coords = OrderedDict([
-                    ("x", round(end_pt.X, 3)),
-                    ("y", round(end_pt.Y, 3)),
-                    ("z", round(end_pt.Z, 3))
+                    ("x", round(convert_from_feet(end_pt.X, unit), 3)),
+                    ("y", round(convert_from_feet(end_pt.Y, unit), 3)),
+                    ("z", round(convert_from_feet(end_pt.Z, unit), 3))
                 ])
 
             # Format arc/curved geometry parameters if applicable
             arc_details = None
             if is_curved and center_pt and radius is not None:
                 arc_details = OrderedDict([
-                    ("center_x", round(center_pt.X, 3)),
-                    ("center_y", round(center_pt.Y, 3)),
-                    ("center_z", round(center_pt.Z, 3)),
-                    ("radius", round(radius, 3))
+                    ("center_x", round(convert_from_feet(center_pt.X, unit), 3)),
+                    ("center_y", round(convert_from_feet(center_pt.Y, unit), 3)),
+                    ("center_z", round(convert_from_feet(center_pt.Z, unit), 3)),
+                    ("radius", round(convert_from_feet(radius, unit), 3))
                 ])
             
             grid_dict = OrderedDict([
@@ -80,7 +81,7 @@ class GridTools(object):
         return OrderedDict([
             ("status", "success"),
             ("message", "Successfully fetched all project grids."),
-            ("measurement_unit", "feet"),
+            ("measurement_unit", unit),
             ("data", OrderedDict([("grids", grids_data)]))
         ])
 

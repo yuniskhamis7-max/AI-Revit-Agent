@@ -25,7 +25,7 @@ For every element category table present in the Input Design Manual, match it to
    - **Text & Categorical parameters** (e.g. Type, Family, Level Name, Grid Name) must match exactly.
    - **Numeric parameters** (e.g. elevation, offsets, coordinates X and Y) must match within ±0.01 ft tolerance.
    - **Spatial Grid Extents**: Grid line lengths/extents are allowed and expected to exceed the column bounds to prevent clipping. If the actual grid line length covers or exceeds the expected footprint length, evaluate it as **PASSED** (do not fail it for being longer).
-3. Deletions: If elements were marked for deletion, verify that they no longer appear in the project lists.
+3. Deletions: If elements were marked for deletion (e.g. `TO_DELETE` status in the Input Design Manual), verify that they no longer appear in the project lists. If an element targeted for deletion does not exist (or its status in the actual results is `Not Found` or it is missing from the list), it has been successfully deleted/removed from the project; therefore, evaluate it as **PASSED**.
 4. Failures: Explicitly list any tool calls that returned an error.
 
 ═══ REPORT FORMAT ════════════════════════════════════════════════════════
