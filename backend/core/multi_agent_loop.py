@@ -23,13 +23,8 @@ from core.agents import (
     SimpleTaskAgent,
     TaskClassifier,
 )
-from core.helpers import (
-    fetch_existing_state,
-    format_state_summary,
-    inject_state_context,
-    filter_duplicate_calls,
-    inject_schemas_context,
-)
+from core.helpers import inject_schemas_context
+from core.state_manager import ModelStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +50,18 @@ class BIMOrchestrator:
         self.provider = provider
         self.tool_schemas = tool_schemas
 
+        # Schema-driven state manager — category map is built once from tool schemas
+        # and reused across all five pipeline operations for the lifetime of this turn.
+        self.state_manager = ModelStateManager(tool_schemas)
+
         # Instantiate all pipeline agents
-        self.classifier      = TaskClassifier(provider, tool_schemas)
+        self.classifier       = TaskClassifier(provider, tool_schemas)
         self.intent_clarifier = BIMIntentClarifierAgent(provider, tool_schemas)
-        self.manual_agent    = BIMDesignManualAgent(provider, tool_schemas)
-        self.planner         = BIMExecutionPlannerAgent(provider, tool_schemas)
-        self.parser          = BIMParserAgent(provider, tool_schemas)
-        self.validator       = BIMValidatorAgent(provider, tool_schemas)
-        self.simple_agent    = SimpleTaskAgent(provider, tool_schemas)
+        self.manual_agent     = BIMDesignManualAgent(provider, tool_schemas)
+        self.planner          = BIMExecutionPlannerAgent(provider, tool_schemas)
+        self.parser           = BIMParserAgent(provider, tool_schemas)
+        self.validator        = BIMValidatorAgent(provider, tool_schemas)
+        self.simple_agent     = SimpleTaskAgent(provider, tool_schemas)
 
     # ── Public entry point ────────────────────────────────────────────────────
 
@@ -84,20 +83,27 @@ class BIMOrchestrator:
         # ── Classify ──────────────────────────────────────────────────────────
         yield self._thought("[BIM Orchestrator] Classifying request...")
 
+        # Collect available categories from state manager
+        available_categories = list(self.state_manager._category_map.keys())
+
         try:
-            classification = await self.classifier.classify(history)
+            classification, categories_to_fetch = await self.classifier.classify(history, available_categories)
         except Exception as exc:
             logger.warning("Task classification failed — defaulting to COMPLEX: %s", exc)
             classification = "COMPLEX"
+            categories_to_fetch = list(available_categories)
 
-        yield self._thought(f"[BIM Orchestrator] → {classification} workflow.")
+        yield self._thought(
+            f"[BIM Orchestrator] → {classification} workflow. "
+            f"Pre-fetching categories: {', '.join(categories_to_fetch) if categories_to_fetch else 'none'}"
+        )
 
         # ── Route ─────────────────────────────────────────────────────────────
         if classification == "SIMPLE":
-            async for event in self._simple_flow(history, execute_tool_fn):
+            async for event in self._simple_flow(history, execute_tool_fn, categories_to_fetch):
                 yield event
         else:
-            async for event in self._complex_flow(history, execute_tool_fn):
+            async for event in self._complex_flow(history, execute_tool_fn, categories_to_fetch):
                 yield event
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -108,6 +114,7 @@ class BIMOrchestrator:
         self,
         history: list[dict],
         execute_tool_fn: Callable,
+        categories_to_fetch: list[str],
     ) -> AsyncGenerator[dict, None]:
         """
         Simple task pipeline:
@@ -119,13 +126,13 @@ class BIMOrchestrator:
         # ── Phase 0: Pre-fetch ────────────────────────────────────────────────
         yield self._thought("[Simple Task Agent] Fetching current model state...")
 
-        existing_state  = await fetch_existing_state(execute_tool_fn, history)
-        state_summary   = format_state_summary(existing_state)
+        existing_state  = await self.state_manager.fetch_existing_state(execute_tool_fn, categories_to_fetch)
+        state_summary   = self.state_manager.format_summary(existing_state)
 
         yield self._thought(f"[Simple Task Agent] Current state:\n{state_summary}")
 
         # Inject state context into conversation so the agent avoids duplicates
-        history_with_ctx = inject_state_context(history, existing_state)
+        history_with_ctx = self.state_manager.inject_context(history, existing_state)
 
         # ── Phase 1: SimpleTaskAgent ──────────────────────────────────────────
         yield self._thought("[Simple Task Agent] Processing request...")
@@ -183,8 +190,8 @@ class BIMOrchestrator:
 
         if is_write:
             yield self._thought("[Simple Task Agent] Verifying changes in Revit...")
-            post_state   = await fetch_existing_state(execute_tool_fn, history)
-            post_summary = format_state_summary(post_state)
+            post_state   = await self.state_manager.fetch_existing_state(execute_tool_fn, categories_to_fetch)
+            post_summary = self.state_manager.format_summary(post_state)
             yield self._thought(
                 f"[Simple Task Agent] Post-execution state:\n{post_summary}"
             )
@@ -205,6 +212,7 @@ class BIMOrchestrator:
         self,
         history: list[dict],
         execute_tool_fn: Callable,
+        categories_to_fetch: list[str],
     ) -> AsyncGenerator[dict, None]:
         """
         Full multi-agent pipeline for complex layout and structural tasks.
@@ -215,11 +223,11 @@ class BIMOrchestrator:
         # PHASE 0 — Pre-flight: fetch existing model state
         # ══════════════════════════════════════════════════════════════════════
         yield self._thought(
-            "[BIM Orchestrator] Phase 0 — Fetching current model state (levels, grids, columns)..."
+            f"[BIM Orchestrator] Phase 0 — Fetching current model state ({', '.join(categories_to_fetch) if categories_to_fetch else 'none'})..."
         )
 
-        existing_state = await fetch_existing_state(execute_tool_fn, history)
-        state_summary  = format_state_summary(existing_state)
+        existing_state = await self.state_manager.fetch_existing_state(execute_tool_fn, categories_to_fetch)
+        state_summary  = self.state_manager.format_summary(existing_state)
 
         yield self._thought(f"[BIM Orchestrator] Model state:\n{state_summary}")
 
@@ -230,7 +238,7 @@ class BIMOrchestrator:
             "[BIM Intent Clarifier] Phase 1 — Analysing design requirements..."
         )
 
-        history_with_ctx = inject_state_context(history, existing_state)
+        history_with_ctx = self.state_manager.inject_context(history, existing_state)
         history_with_ctx = inject_schemas_context(history_with_ctx, self.tool_schemas)
 
         try:
@@ -309,7 +317,7 @@ class BIMOrchestrator:
             return
 
         # Deterministic dedup safety net — strips any duplicate create_* calls
-        batch_data, dedup_report = filter_duplicate_calls(
+        batch_data, dedup_report = self.state_manager.filter_duplicates(
             batch_data, existing_state
         )
         if dedup_report:
@@ -361,10 +369,40 @@ class BIMOrchestrator:
                "result": batch_result, "approved": True}
 
         if batch_result.get("status") == "error":
+            err_msg = batch_result.get("message", "Unknown error")
             yield self._thought(
-                f"[BIM Orchestrator] Batch transaction failed and was rolled back in Revit: {batch_result.get('message', 'Unknown error')}. "
-                "Proceeding to reverse-parse results and run validation on the failures."
+                f"[BIM Orchestrator] Batch transaction failed and was rolled back in Revit: {err_msg}. "
+                "Aborting validation."
             )
+            report = (
+                f"\n\n### 🔍 Validation Report\n\n"
+                f"## Validation Report\n\n"
+                f"### Execution Status\n"
+                f"| Phase | Status | Note |\n"
+                f"| :--- | :--- | :--- |\n"
+                f"| Revit Transaction | **FAILED** | Batch transaction aborted and rolled back. |\n\n"
+                f"### Failures\n"
+                f"- Batch transaction aborted: {err_msg}\n\n"
+                f"### Summary\n"
+                f"Elements checked: 0  |  Passed: 0  |  Failed: 1\n\n"
+                f"VALIDATION: FAILED"
+            )
+            yield {
+                "type":    "text_delta",
+                "content": report,
+            }
+            yield {
+                "type":    "text_delta",
+                "content": (
+                    "\n\n### ⚠️ Validation Issues Detected\n\n"
+                    "One or more elements do not match the design intent when "
+                    "compared against actual Revit data. "
+                    "Please review the Validation Report above.\n\n"
+                    "You can request corrections or a retry with adjusted parameters."
+                ),
+            }
+            yield self._thought("[BIM Orchestrator] Multi-agent pipeline finished.")
+            return
 
         # ══════════════════════════════════════════════════════════════════════
         # PHASE 6 — Reverse Parse: parser agent fetches real state → Result Design Manual

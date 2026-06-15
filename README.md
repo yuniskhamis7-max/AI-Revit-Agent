@@ -66,9 +66,9 @@
 > ---
 >
 > ### Rule 6 — Dedup and Safety Nets Are Mandatory
-> - The `filter_duplicate_calls()` helper in [helpers.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/helpers.py) must always be applied in Phase 4 before dispatching the batch. It is a programmatic safety net that runs **regardless** of what the LLM emits.
+> - The `ModelStateManager.filter_duplicates()` method in [state_manager.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/state_manager.py) must always be applied in Phase 4 before dispatching the batch. It is a programmatic safety net that runs **regardless** of what the LLM emits.
 > - Do not remove or bypass it — LLM hallucinations are expected and the safety net catches them before they cause Revit transaction aborts.
-> - When adding new tool types, ensure the dedup logic is updated to cover naming/spatial conflicts for those types.
+> - Since it derives metadata dynamically from tool schemas, adding a new BIM category on the Revit side automatically inherits this safety net if schemas are decorated with category configuration fields (like `id_field`, `name_field`, `name_case`, etc.).
 >
 > ---
 >
@@ -118,8 +118,9 @@ This document serves as the absolute authority on the architecture, setup, confi
 2. [Database Design & Schema](#2-database-design--schema)
    - [Transition Away from SQLAlchemy ORM](#transition-away-from-sqlalchemy-orm)
    - [SQLite Tables & Relationships](#sqlite-tables--relationships)
-3. [AI Agent Core & Generator Loop](#3-ai-agent-core--generator-loop)
+3. [AI Agent Core & Multi-Agent Pipeline](#3-ai-agent-core--multi-agent-pipeline)
    - [Decoupled Architecture](#decoupled-architecture)
+   - [Schema-Driven State Management](#schema-driven-state-management)
    - [SSE Streaming & Event Formats](#sse-streaming-&-event-formats)
    - [Client Disconnect Handling & State Persistence](#client-disconnect-handling-&-state-persistence)
 4. [Repository Structure](#4-repository-structure)
@@ -333,19 +334,36 @@ All agents are defined in [agents.py](file:///d:/Construction/Projects/ai_revit_
 
 ---
 
+### Schema-Driven State Management
+
+To satisfy **Rule 1** (Generic, Dynamic, Scalable by Default), the repository uses the `ModelStateManager` in [state_manager.py](file:///d:/Construction/Projects/ai_revit_agent/backend/core/state_manager.py). 
+
+Instead of hardcoding element categories, database keys, ID fields, or naming cases in the orchestrator, `ModelStateManager` builds an internal configuration mapping at runtime by parsing the tool schemas discovered from Revit. 
+
+It handles:
+1. **Selective State Fetching**: `fetch_existing_state()` only executes the `fetch_*` tools for the categories relevant to the current task context (provided by the `TaskClassifier` during task routing).
+2. **Dynamic Formatting**: `format_summary()` prints a compact, structured representation of all active Revit elements (like grids, levels, column types, and columns) without knowing their exact schema structures beforehand.
+3. **Context Injection**: `inject_context()` appends the retrieved state as a markdown prompt message to prevent duplicate or conflict proposals by LLM agents.
+4. **Deterministic De-duplication**: `filter_duplicates()` removes duplicate `create_*`/`duplicate_*` calls and checks for "phantom deletes" using fast lookup sets generated from the live project state.
+5. **Post-Execution State Retrieval**: `fetch_created_elements()` resolves the real Revit parameter state (e.g. coordinates, properties, IDs) of newly created or deleted elements immediately after batch execution.
+
+---
+
 ### Routing: SIMPLE vs COMPLEX
 
-Every user turn is first classified:
+Every user turn is first classified by the `TaskClassifier`:
 
-- **SIMPLE**: A single direct action — fetching, creating, deleting, or modifying one element. Routes to `_simple_flow()`.
+- **SIMPLE**: A single direct action — fetching, querying, or modifying one element. Routes to `_simple_flow()`.
 - **COMPLEX**: A coordinated multi-element layout (column grids, level stacks, etc.) requiring planning and dependency ordering. Routes to `_complex_flow()`.
+
+The `TaskClassifier` returns a JSON object specifying both the workflow type and a list of specific BIM categories to fetch. This enables the orchestrator to perform selective pre-fetching (e.g. only querying grids and columns instead of fetching every category on every turn).
 
 ---
 
 ### SIMPLE Flow
 
 ```
-Phase 0 — Pre-fetch existing model state (levels, grids, columns)
+Phase 0 — Pre-fetch context-relevant model state (determined by TaskClassifier)
 Phase 1 — SimpleTaskAgent: tool-calling turn
             If info is missing → asks the user; next turn continues naturally
 Phase 2 — Post-fetch verification (write ops only) → user-facing report
@@ -358,12 +376,12 @@ The current model state is injected as a `system` message so the agent knows wha
 ### COMPLEX Flow (8 Phases)
 
 ```
-Phase 0 — Pre-flight: fetch_levels + fetch_grids + fetch_structural_columns
+Phase 0 — Pre-flight: Fetch only the context-relevant element categories (determined by TaskClassifier)
 Phase 1 — BIMIntentClarifierAgent: iterate until "DESIGN INTENT ESTABLISHED"
 Phase 2 — BIMDesignManualAgent: produce self-contained numeric Input Design Manual
 Phase 3 — BIMExecutionPlannerAgent: produce markdown strategy plan
 Phase 4 — BIMParserAgent.manual_to_json(): Input DM → execute_batch JSON
-           filter_duplicate_calls(): deterministic dedup safety net
+           ModelStateManager.filter_duplicates(): deterministic dedup safety net
 Phase 5 — execute_batch → Revit (single atomic transaction)
 Phase 6 — BIMParserAgent (tool-calling agent loop, fetch_* only):
            inspect batch result → infer fetch_* tools → call them → compile Result Design Manual
@@ -411,7 +429,7 @@ This makes every intermediate step debuggable — the agent activity panel in th
 
 ### Programmatic Dedup Safety Net
 
-In Phase 4, `_filter_duplicate_calls()` deterministically strips any `create_level` or `create_grid` calls whose names already exist in Revit — **regardless of what the LLM emits**. This runs on every complex task and prevents Revit transaction aborts caused by duplicate element names. The orchestrator also injects the existing state into every agent prompt as a secondary (LLM-level) guardrail.
+In Phase 4, `ModelStateManager.filter_duplicates()` deterministically strips any creation calls whose names already exist in Revit, as well as phantom delete calls whose targets do not exist — **regardless of what the LLM emits**. This runs on every complex task and prevents Revit transaction aborts caused by duplicate element names or invalid ID deletions. The orchestrator also injects the existing state into every agent prompt as a secondary (LLM-level) guardrail.
 
 ---
 

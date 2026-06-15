@@ -20,7 +20,8 @@ Analyse the Input Design Manual and produce a concise, structured Execution Plan
 ═══ DYNAMIC DEPENDENCY ORDERING (Generic BIM Layers) ════════════════════
 Schedule the Revit operations in this logical dependency order:
   1. Deletion/Cleanup: Any element marked for deletion (e.g. "TO_DELETE") should be scheduled FIRST to avoid name collisions with subsequent creates.
-  2. Datums Layer (Levels): Levels establish vertical datum planes and must be created next.
+     *EXCEPTION (Levels Lifecycle):* Revit database rules require at least one level to exist in the project at all times. Therefore, if existing levels are targeted for deletion AND new levels are being created, you MUST schedule the creation of new levels BEFORE the deletion of the old levels.
+  2. Datums Layer (Levels): Levels establish vertical datum planes and must be created next (unless deferred as per the Levels Lifecycle exception above).
   3. Reference Layer (Grids, Reference Lines): Grid lines establish the horizontal layout and must be created after levels.
   4. Type Creation (Family Types): New element types (e.g., a new column type with custom dimensions) MUST be created BEFORE any instances of that type are placed. Without the type in Revit, instance placement will fail.
   5. Host Layer (Walls, Columns, Slabs, Rafts, Beams): Structural hosts depend on levels, grids, and types — must be created after all of the above.

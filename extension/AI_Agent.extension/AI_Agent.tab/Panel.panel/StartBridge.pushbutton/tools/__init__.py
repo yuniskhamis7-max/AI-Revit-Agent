@@ -12,7 +12,26 @@ class ToolRegistry(object):
     def __init__(self):
         self._tools = {}
 
-    def register(self, name, description, custom_instructions=None, parameters=None, measurement_unit="feet", rotation_unit=None):
+    def register(self, name, description, custom_instructions=None, parameters=None,
+                 measurement_unit="feet", rotation_unit=None,
+                 # ── Schema metadata fields — read by the backend at runtime ──────
+                 # category:     Logical element group (e.g. "levels", "columns").
+                 #               Tools sharing the same category are treated as a unit
+                 #               by the backend's ModelStateManager.
+                 # data_key:     Key inside result["data"] where the list lives.
+                 #               Only needed on fetch_* tools (e.g. "columns").
+                 # id_field:     Name of the unique-ID field in result items.
+                 #               Set on delete_* tools for phantom-delete guard.
+                 # name_field:   Name of the human-readable name field in input.
+                 #               Set on create_* / duplicate_* for duplicate-create guard.
+                 # keywords:     Trigger words in user prompt that cause selective
+                 #               pre-fetching of this category. Set on fetch_* tools.
+                 # name_case:    "lower" (case-insensitive) or "exact" comparison
+                 #               when checking for duplicate names.
+                 # always_fetch: True to always pre-fetch regardless of keywords
+                 #               (use for datum categories like levels/grids).
+                 category=None, data_key=None, id_field=None, name_field=None,
+                 keywords=None, name_case="lower", always_fetch=False):
         """Decorator to register a function as an agent-callable tool."""
         def decorator(func):
             schema = OrderedDict()
@@ -25,6 +44,15 @@ class ToolRegistry(object):
             if rotation_unit:
                 schema["rotation_unit"] = rotation_unit
             schema["parameters"] = parameters or {}
+
+            # Emit metadata into schema so the backend can read it dynamically
+            if category:     schema["category"]     = category
+            if data_key:     schema["data_key"]     = data_key
+            if id_field:     schema["id_field"]     = id_field
+            if name_field:   schema["name_field"]   = name_field
+            if keywords:     schema["keywords"]     = list(keywords)
+            if name_case:    schema["name_case"]    = name_case
+            if always_fetch: schema["always_fetch"] = always_fetch
 
             self._tools[name] = {
                 "callable": func,
@@ -84,23 +112,22 @@ class ToolRegistry(object):
                 })
 
             doc = ui_app.ActiveUIDocument.Document
-            
-            # Dynamically reload submodules to pick up code edits instantly
+
+            # Auto-reload all tool submodules to pick up code edits instantly.
+            # Uses pkgutil so any new *_tools.py file is discovered automatically —
+            # no manual list maintenance required.
             try:
                 import sys
-                if 'tools.utils' in sys.modules:
-                    reload(sys.modules['tools.utils'])
-                if 'tools.level_tools' in sys.modules:
-                    reload(sys.modules['tools.level_tools'])
-                if 'tools.grid_tools' in sys.modules:
-                    reload(sys.modules['tools.grid_tools'])
-                if 'tools.column_tools' in sys.modules:
-                    reload(sys.modules['tools.column_tools'])
+                import pkgutil
+                import tools as _tools_pkg
+                for _importer, _modname, _ispkg in pkgutil.iter_modules(_tools_pkg.__path__):
+                    _full_name = 'tools.' + _modname
+                    if _full_name in sys.modules:
+                        reload(sys.modules[_full_name])
             except Exception:
                 pass
-                
+
             tool_fn = self._tools[tool_name]["callable"]
-            
             result = tool_fn(doc, ui_app, tool_input)
             return json.dumps(result)
 
@@ -114,13 +141,22 @@ class ToolRegistry(object):
 registry = ToolRegistry()
 
 # =====================================================================
-# ACTION TOOL REGISTRATION AND ROUTING
+# SHARED PARAMETER DEFINITIONS
 # =====================================================================
 
-# Shared 'unit' parameter definition for all measurement-accepting tools.
-# Added to each tool schema below so the agent can specify the input unit.
-_UNIT_PARAM = {"type": "string", "description": "Unit of all numeric measurement values in this call. Supported: 'feet', 'meters', 'mm', 'cm', 'inches'. Defaults to 'feet'."}
+# Shared 'unit' parameter definition — added to all measurement-accepting tools.
+_UNIT_PARAM = {
+    "type": "string",
+    "description": (
+        "Unit of all numeric measurement values in this call. "
+        "Supported: 'feet', 'meters', 'mm', 'cm', 'inches'. Defaults to 'feet'."
+    )
+}
 
+
+# =====================================================================
+# LEVEL TOOLS
+# =====================================================================
 
 @registry.register(
     name="fetch_levels",
@@ -129,11 +165,14 @@ _UNIT_PARAM = {"type": "string", "description": "Unit of all numeric measurement
     measurement_unit="feet",
     parameters={
         "type": "object",
-        "properties": {
-            "unit": _UNIT_PARAM
-        },
+        "properties": {"unit": _UNIT_PARAM},
         "required": []
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="levels",
+    data_key="levels",
+    keywords=["level", "elevation", "height", "storey", "datum", "room", "space", "area"],
+    always_fetch=True,
 )
 def fetch_levels(doc, ui_app, tool_input):
     from tools.level_tools import LevelTools
@@ -148,11 +187,14 @@ def fetch_levels(doc, ui_app, tool_input):
     measurement_unit="feet",
     parameters={
         "type": "object",
-        "properties": {
-            "unit": _UNIT_PARAM
-        },
+        "properties": {"unit": _UNIT_PARAM},
         "required": []
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="grids",
+    data_key="grids",
+    keywords=["grid", "axis", "gridline", "spacing", "wall", "partition", "floor", "slab", "ceiling", "roof"],
+    always_fetch=True,
 )
 def fetch_grids(doc, ui_app, tool_input):
     from tools.grid_tools import GridTools
@@ -176,7 +218,11 @@ def fetch_grids(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["name", "start_x", "start_y", "end_x", "end_y"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="grids",
+    name_field="name",
+    name_case="exact",
 )
 def create_grid(doc, ui_app, tool_input):
     from Autodesk.Revit.DB import XYZ
@@ -213,7 +259,8 @@ def create_grid(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["grid_id"]
-    }
+    },
+    category="grids",
 )
 def modify_grid(doc, ui_app, tool_input):
     from Autodesk.Revit.DB import XYZ
@@ -259,7 +306,10 @@ def modify_grid(doc, ui_app, tool_input):
             "grid_id": {"type": "string", "description": "The UniqueId of the target grid."}
         },
         "required": ["grid_id"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="grids",
+    id_field="grid_id",
 )
 def delete_grid(doc, ui_app, tool_input):
     from tools.grid_tools import GridTools
@@ -286,7 +336,11 @@ def delete_grid(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["name", "elevation"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="levels",
+    name_field="name",
+    name_case="lower",
 )
 def create_level(doc, ui_app, tool_input):
     from tools.level_tools import LevelTools
@@ -334,7 +388,8 @@ def create_level(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["level_id"]
-    }
+    },
+    category="levels",
 )
 def modify_level(doc, ui_app, tool_input):
     from tools.level_tools import LevelTools
@@ -375,13 +430,20 @@ def modify_level(doc, ui_app, tool_input):
             "level_id": {"type": "string", "description": "The UniqueId of the target level."}
         },
         "required": ["level_id"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="levels",
+    id_field="level_id",
 )
 def delete_level(doc, ui_app, tool_input):
     from tools.level_tools import LevelTools
     level_id = tool_input["level_id"]
     return LevelTools(doc).delete(level_id, ui_app)
 
+
+# =====================================================================
+# STRUCTURAL COLUMN TOOLS
+# =====================================================================
 
 @registry.register(
     name="fetch_structural_columns",
@@ -390,11 +452,13 @@ def delete_level(doc, ui_app, tool_input):
     rotation_unit="degrees",
     parameters={
         "type": "object",
-        "properties": {
-            "unit": _UNIT_PARAM
-        },
+        "properties": {"unit": _UNIT_PARAM},
         "required": []
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="columns",
+    data_key="columns",
+    keywords=["column", "pillar", "post", "structural"],
 )
 def fetch_structural_columns(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
@@ -410,7 +474,11 @@ def fetch_structural_columns(doc, ui_app, tool_input):
         "type": "object",
         "properties": {},
         "required": []
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="column_types",
+    data_key="column_types",
+    keywords=["column type", "column family", "section", "profile"],
 )
 def fetch_structural_column_types(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
@@ -437,7 +505,12 @@ def fetch_structural_column_types(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["x", "y", "base_level_id"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    # Columns don't use a name field for duplicate detection (they're position-based),
+    # but we still set id_field so the backend tracks created element IDs.
+    category="columns",
+    id_field="column_id",
 )
 def create_structural_column(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
@@ -452,7 +525,7 @@ def create_structural_column(doc, ui_app, tool_input):
     top_offset = convert_to_feet(tool_input.get("top_offset", 0.0), unit)
     rotation_degrees = tool_input.get("rotation_degrees", 0.0)
     column_type_id = tool_input.get("column_type_id")
-    
+
     return ColumnTools(doc).create(
         x=x,
         y=y,
@@ -485,7 +558,8 @@ def create_structural_column(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["column_id"]
-    }
+    },
+    category="columns",
 )
 def modify_structural_column(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
@@ -501,7 +575,7 @@ def modify_structural_column(doc, ui_app, tool_input):
     top_offset = convert_to_feet(tool_input["top_offset"], unit) if tool_input.get("top_offset") is not None else None
     rotation_degrees = tool_input.get("rotation_degrees")
     column_type_id = tool_input.get("column_type_id")
-    
+
     return ColumnTools(doc).modify(
         column_id=column_id,
         x=x,
@@ -525,7 +599,10 @@ def modify_structural_column(doc, ui_app, tool_input):
             "column_id": {"type": "string", "description": "UniqueId of the structural column to delete."}
         },
         "required": ["column_id"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="columns",
+    id_field="column_id",
 )
 def delete_structural_column(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
@@ -550,7 +627,12 @@ def delete_structural_column(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["column_type_id", "new_type_name"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    # new_type_name is the field the backend checks for duplicate-create guard.
+    category="column_types",
+    name_field="new_type_name",
+    name_case="lower",
 )
 def duplicate_structural_column_type(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
@@ -563,7 +645,7 @@ def duplicate_structural_column_type(doc, ui_app, tool_input):
     dimensions = {}
     for k, v in raw_dims.items():
         dimensions[k] = convert_to_feet(v, unit)
-    
+
     return ColumnTools(doc).duplicate_type(column_type_id, new_type_name, dimensions)
 
 
@@ -583,7 +665,8 @@ def duplicate_structural_column_type(doc, ui_app, tool_input):
             "unit": _UNIT_PARAM
         },
         "required": ["column_type_id", "dimensions"]
-    }
+    },
+    category="column_types",
 )
 def modify_structural_column_type(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
@@ -595,7 +678,7 @@ def modify_structural_column_type(doc, ui_app, tool_input):
     dimensions = {}
     for k, v in raw_dims.items():
         dimensions[k] = convert_to_feet(v, unit)
-    
+
     return ColumnTools(doc).modify_type(column_type_id, dimensions)
 
 
@@ -609,13 +692,20 @@ def modify_structural_column_type(doc, ui_app, tool_input):
             "column_type_id": {"type": "string", "description": "UniqueId of target structural column type to delete."}
         },
         "required": ["column_type_id"]
-    }
+    },
+    # ── metadata ──────────────────────────────────────────────────────────────
+    category="column_types",
+    id_field="column_type_id",
 )
 def delete_structural_column_type(doc, ui_app, tool_input):
     from tools.column_tools import ColumnTools
     column_type_id = tool_input["column_type_id"]
     return ColumnTools(doc).delete_type(column_type_id)
 
+
+# =====================================================================
+# BATCH EXECUTION (meta-tool — no category)
+# =====================================================================
 
 @registry.register(
     name="execute_batch",
@@ -643,56 +733,56 @@ def delete_structural_column_type(doc, ui_app, tool_input):
 def execute_batch(doc, ui_app, tool_input):
     from Autodesk.Revit.DB import TransactionGroup
     from collections import OrderedDict
-    
+
     calls = tool_input.get("calls", [])
     if not calls:
         return OrderedDict([
             ("status", "error"),
             ("message", "Empty batch request: no calls provided.")
         ])
-        
+
     tg = TransactionGroup(doc, "Agent - Execute Batch")
     tg.Start()
-    
+
     results = []
     success = True
     error_message = None
-    
+
     try:
         for idx, call in enumerate(calls):
             t_name = call.get("tool")
             t_input = call.get("input") or {}
-            
+
             if t_name == "execute_batch":
                 success = False
                 error_message = "Nested execute_batch calls are not allowed."
                 break
-                
+
             if t_name not in registry._tools:
                 success = False
                 error_message = "Tool '{}' (call index {}) not found in registry.".format(t_name, idx)
                 break
-                
-            # Retrieve tool callable
+
             tool_fn = registry._tools[t_name]["callable"]
-            
-            # Execute
+
             try:
                 res = tool_fn(doc, ui_app, t_input)
             except Exception as e:
                 res = {"status": "error", "message": "Python tool execution exception: " + str(e)}
-                
+
             results.append(OrderedDict([
                 ("tool", t_name),
                 ("input", t_input),
                 ("result", res)
             ]))
-            
+
             if isinstance(res, dict) and res.get("status") == "error":
                 success = False
-                error_message = "Tool '{}' at index {} failed: {}".format(t_name, idx, res.get("message", "No error message"))
+                error_message = "Tool '{}' at index {} failed: {}".format(
+                    t_name, idx, res.get("message", "No error message")
+                )
                 break
-                
+
         if success:
             tg.Assimilate()
             return OrderedDict([
@@ -708,7 +798,7 @@ def execute_batch(doc, ui_app, tool_input):
                 ("message", "Batch aborted and rolled back. " + error_message),
                 ("data", OrderedDict([("results", results)]))
             ])
-            
+
     except Exception as ex:
         try:
             tg.RollBack()
@@ -719,4 +809,3 @@ def execute_batch(doc, ui_app, tool_input):
             ("message", "Batch system runtime exception: " + str(ex)),
             ("data", OrderedDict([("results", results)]))
         ])
-

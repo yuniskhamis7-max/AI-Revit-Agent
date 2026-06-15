@@ -101,17 +101,38 @@ class BaseAgent:
 
 class TaskClassifier(BaseAgent):
     """
-    Classifies the user's request as SIMPLE or COMPLEX.
+    Classifies the user's request as SIMPLE or COMPLEX and decides which categories of
+    BIM elements to pre-fetch.
     """
 
     def __init__(self, provider: AIProvider, tool_schemas: list[dict] | None = None) -> None:
         super().__init__(provider, tool_schemas)
         self.SYSTEM_PROMPT = load_prompt("task_classifier.txt")
 
-    async def classify(self, history: list[dict]) -> str:
-        """Return 'SIMPLE' or 'COMPLEX'."""
-        result = await self.generate_response(history, self.SYSTEM_PROMPT)
-        return "COMPLEX" if "COMPLEX" in result.strip().upper() else "SIMPLE"
+    async def classify(self, history: list[dict], available_categories: list[str]) -> tuple[str, list[str]]:
+        """Return (workflow, categories_to_fetch) tuple."""
+        categories_str = ", ".join(f"'{c}'" for c in available_categories)
+        system_prompt = self.SYSTEM_PROMPT.format(categories=categories_str)
+
+        result = await self.generate_response(history, system_prompt)
+
+        # Extract JSON from code blocks if present
+        match = re.search(r"```json\s*(.*?)\s*```", result, re.DOTALL)
+        json_str = match.group(1).strip() if match else result.strip()
+
+        try:
+            data = json.loads(json_str)
+            workflow = data.get("workflow", "COMPLEX").upper()
+            categories = data.get("categories", [])
+            if not isinstance(categories, list):
+                categories = []
+            # Clean and filter to only valid categories
+            categories = [c for c in categories if c in available_categories]
+            return workflow, categories
+        except Exception as exc:
+            logger.warning("Failed to parse classifier JSON output: %s. Output was: %s", exc, result)
+            # Fallback to COMPLEX and fetch everything
+            return "COMPLEX", list(available_categories)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
